@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="铮铮眼镜 WAIC 2026 项目 PPT 预览与播放。">
+    <title>铮铮眼镜 - 项目 PPT 预览</title>
+    <link rel="stylesheet" href="style.css?v=20260520-ppt2">
+</head>
+<body class="ppt-page">
+    <div class="glasses-container ppt-container">
+        <header class="site-header ppt-header">
+            <div class="header-top">
+                <a href="./index.html" class="logo" aria-label="回到铮铮眼镜首页">
+                    <span class="logo-mark">
+                        <img src="assets/glasses-frame-ai-39.png?v=20260517-ai80" alt="">
+                    </span>
+                    <span>铮铮眼镜</span>
+                </a>
+                <nav class="top-nav" aria-label="页面导航">
+                    <a href="./index.html">首页</a>
+                    <a class="carry-user-link" href="./onboard.html">开始录入</a>
+                    <a class="carry-user-link" href="./chat.html">聊天</a>
+                </nav>
+                <div class="user-section">
+                    <a class="btn btn-secondary" href="assets/ppt/zhengzheng-glasses-waic2026-kimi-lite.pptx">项目 PPTX</a>
+                </div>
+            </div>
+
+            <section class="ppt-hero">
+                <div>
+                    <p class="eyebrow">WAIC 2026 申报材料</p>
+                    <h1>铮铮眼镜项目 PPT</h1>
+                    <p>这里引用站点内这一份项目 PPT，提供站内图片化预览和播放模式；公开版本只保留脱敏截图、流程图和二维码。</p>
+                </div>
+                <div class="ppt-meta-card">
+                    <span>当前版本</span>
+                    <strong>Kimi 接入版 · 脱敏轻量版</strong>
+                    <small>14 页 · 无真人脸 · 含切换动画 · 可下载 PPTX</small>
+                </div>
+            </section>
+        </header>
+
+        <main class="ppt-main">
+            <section class="ppt-player-card" aria-label="PPT 播放器">
+                <div class="ppt-toolbar">
+                    <div>
+                        <span id="ppt-counter">1 / 14</span>
+                        <strong id="ppt-title">封面</strong>
+                    </div>
+                    <div class="ppt-actions">
+                        <button class="btn btn-secondary" type="button" id="ppt-prev">上一页</button>
+                        <button class="btn btn-primary" type="button" id="ppt-play">播放</button>
+                        <button class="btn btn-secondary" type="button" id="ppt-next">下一页</button>
+                        <button class="btn btn-secondary" type="button" id="ppt-fullscreen">全屏</button>
+                    </div>
+                </div>
+
+                <figure class="ppt-stage" id="ppt-stage">
+                    <img id="ppt-slide" src="assets/ppt/preview-private-v2/slide-01.png?v=20260520-private2" alt="铮铮眼镜 PPT 第 1 页">
+                </figure>
+
+                <div class="ppt-progress" aria-hidden="true">
+                    <span id="ppt-progress-bar"></span>
+                </div>
+
+                <div class="ppt-thumb-strip" id="ppt-thumbs" aria-label="幻灯片缩略图"></div>
+            </section>
+
+            <section class="ppt-reference-card" aria-label="项目 PPT 文件引用">
+                <div>
+                    <p class="eyebrow">文件引用</p>
+                    <h2>项目 PPTX</h2>
+                    <p>本页只引用这一份项目 PPT：预览图用于网页播放，PPTX 原文件用于投稿或继续编辑；公开版不包含真人脸。</p>
+                </div>
+                <div class="ppt-file-actions">
+                    <a class="btn btn-primary" href="assets/ppt/zhengzheng-glasses-waic2026-kimi-lite.pptx">打开项目 PPTX</a>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>&copy; 2026 铮铮眼镜 | <a href="https://zhengzhengstudio.cn">铮铮实验室</a></p>
+        </footer>
+    </div>
+
+    <script src="ppt.js?v=20260520-ppt2"></script>
+</body>
+</html>

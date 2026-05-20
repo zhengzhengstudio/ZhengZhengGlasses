@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="铮铮眼镜提供在线试戴、脸型参数采集、镜框推荐和商家接单入口。">
+    <title>铮铮眼镜 - 我的试戴主页</title>
+    <link rel="stylesheet" href="style.css?v=20260519-serverchat1">
+</head>
+<body class="home-page">
+    <div class="glasses-container home-container">
+        <header class="site-header home-header">
+            <div class="header-top">
+                <a href="./index.html" class="logo" aria-label="铮铮眼镜首页">
+                    <span class="logo-mark">
+                        <img src="assets/glasses-frame-ai-39.png?v=20260517-ai80" alt="">
+                    </span>
+                    <span>铮铮眼镜</span>
+                </a>
+                <nav class="top-nav" aria-label="页面导航">
+                    <a class="nav-strong carry-user-link" href="./onboard.html">开始录入</a>
+                    <a href="#entry-section">入口</a>
+                    <a href="#profile-section">我的信息</a>
+                    <a href="#how-it-works">怎么用</a>
+                    <a href="./ppt.html">PPT</a>
+                </nav>
+                <div class="user-section" id="home-user-actions">
+                    <a class="btn btn-secondary" id="home-login-link" href="https://zhengzhengstudio.cn/passport/login.html?redirect=https%3A%2F%2Fglasses.zhengzhengstudio.cn%2F&from=glasses">登录</a>
+                    <a class="btn btn-primary" id="home-register-link" href="https://zhengzhengstudio.cn/passport/register.html?redirect=https%3A%2F%2Fglasses.zhengzhengstudio.cn%2F&from=glasses">注册</a>
+                </div>
+            </div>
+
+            <section class="home-hero">
+                <div class="home-hero-copy">
+                    <p class="eyebrow">在线试戴与配镜参数</p>
+                    <h1>先确认合不合脸，再决定要不要配这一副。</h1>
+                    <p>第一次使用从“录入/查看信息”开始：登录或跳过、采集脸型、选偏好、试戴镜框。完成后回到这里，就能看到你的参数、当前试戴和继续入口。</p>
+                    <div class="hero-actions">
+                        <a class="btn btn-primary btn-large carry-user-link" href="./onboard.html">录入/查看信息</a>
+                        <a class="btn btn-secondary btn-large carry-user-link" href="./customer.html">直接进入工作台</a>
+                        <a class="btn btn-secondary btn-large" href="./ppt.html">播放项目 PPT</a>
+                        <a class="btn btn-secondary btn-large carry-user-link" href="./merchant.html">商家管理</a>
+                    </div>
+                </div>
+                <figure class="home-frame-preview">
+                    <img id="home-current-frame" src="assets/glasses-frame-ai-46.png?v=20260517-ai80" alt="当前试戴镜框">
+                    <figcaption id="home-frame-caption">还没有试戴记录，先从引导流程选择一副镜框。</figcaption>
+                </figure>
+            </section>
+        </header>
+
+        <main>
+            <section class="home-status-grid" aria-label="当前使用状态">
+                <div>
+                    <span>身份</span>
+                    <strong id="home-status-user">匿名体验</strong>
+                    <small>每个用户独立保存数据</small>
+                </div>
+                <div>
+                    <span>配镜档案</span>
+                    <strong id="home-status-record">未采集</strong>
+                    <small>脸型、瞳距、镜圈建议</small>
+                </div>
+                <div>
+                    <span>心愿单</span>
+                    <strong id="home-status-wishlist">0 款</strong>
+                    <small>先收藏，再统一沟通</small>
+                </div>
+                <div>
+                    <span>商家沟通</span>
+                    <strong id="home-status-chat">未发送</strong>
+                    <small>带采集包发给商家</small>
+                </div>
+            </section>
+
+            <section class="home-onboard-banner" aria-label="录入入口">
+                <div>
+                    <p class="eyebrow">第一步</p>
+                    <h2>先录入脸型数据，再回到主页看结果。</h2>
+                    <p>这里会像设备 onboarding 一样带你完成登录、正脸/多角度采集、偏好选择和单镜试戴。</p>
+                </div>
+                <a class="btn btn-primary btn-large carry-user-link" href="./onboard.html">开始录入</a>
+            </section>
+
+            <section class="home-panel profile-panel" id="profile-section">
+                <div>
+                    <p class="eyebrow">我的信息</p>
+                    <h2 id="home-profile-title">未登录也可以先体验</h2>
+                    <p id="home-profile-desc">登录后可保存脸型参数、偏好、试戴记录和发送给商家的定制意向。</p>
+                </div>
+                <div class="profile-summary" id="home-profile-summary">
+                    <div>
+                        <span>当前身份</span>
+                        <strong id="home-user-name">游客</strong>
+                    </div>
+                    <div>
+                        <span>保存状态</span>
+                        <strong id="home-save-state">未保存</strong>
+                    </div>
+                    <div>
+                        <span>下一步</span>
+                        <strong id="home-next-step">进入客户流程</strong>
+                    </div>
+                </div>
+            </section>
+
+            <section class="home-panel home-data-panel" id="home-data-panel">
+                <div class="section-heading compact">
+                    <p class="eyebrow">采集数据</p>
+                    <h2 id="home-data-title">还没有采集结果</h2>
+                </div>
+                <div class="home-data-grid">
+                    <div><span>脸型</span><strong id="home-face-shape">-</strong></div>
+                    <div><span>脸宽</span><strong id="home-face-width">-</strong></div>
+                    <div><span>瞳距</span><strong id="home-pd">-</strong></div>
+                    <div><span>建议镜圈宽度</span><strong id="home-lens-width">-</strong></div>
+                    <div><span>移心量</span><strong id="home-decentration">-</strong></div>
+                    <div><span>适配评分</span><strong id="home-fit-score">-</strong></div>
+                </div>
+                <div class="home-current-tryon">
+                    <div>
+                        <span>当前试戴</span>
+                        <strong id="home-frame-name">未选择镜框</strong>
+                        <p id="home-frame-note">完成引导后，主页会显示最后一次选择的镜框。</p>
+                    </div>
+                    <a class="btn btn-primary carry-user-link" href="./onboard.html">录入/查看信息</a>
+                </div>
+            </section>
+
+            <section class="entry-section" id="entry-section" aria-label="功能入口">
+                <a class="entry-card carry-user-link" href="./onboard.html">
+                    <span>01</span>
+                    <h3>录入/查看信息</h3>
+                    <p>一步步完成注册、脸型采集、偏好和试戴确认，完成后主页会显示结果。</p>
+                </a>
+                <a class="entry-card carry-user-link" href="./customer.html">
+                    <span>02</span>
+                    <h3>完整工作台</h3>
+                    <p>录入照片或摄像头数据，查看脸型参数、试戴结论和推荐镜框。</p>
+                </a>
+                <a class="entry-card carry-user-link" href="./merchant.html">
+                    <span>03</span>
+                    <h3>商家后台</h3>
+                    <p>商家登录后维护镜框样板，查看顾客参数与定制意向。</p>
+                </a>
+                <a class="entry-card" href="./ppt.html">
+                    <span>04</span>
+                    <h3>项目 PPT</h3>
+                    <p>查看 WAIC 申报 PPT，可预览、播放，也能打开原始 PPTX 文件。</p>
+                </a>
+            </section>
+
+            <section class="home-panel" id="how-it-works">
+                <div class="section-heading compact">
+                    <p class="eyebrow">流程</p>
+                    <h2>先引导，后回到主页查看自己的状态。</h2>
+                </div>
+                <div class="home-steps">
+                    <div>
+                        <span>拍照/摄像头</span>
+                        <strong>采集正脸和多角度数据</strong>
+                    </div>
+                    <div>
+                        <span>参数校准</span>
+                        <strong>估算瞳距、鼻梁宽、镜圈宽度和移心量</strong>
+                    </div>
+                    <div>
+                        <span>单镜试戴</span>
+                        <strong>一次看一副，横向切换候选镜框</strong>
+                    </div>
+                    <div>
+                        <span>发给商家</span>
+                        <strong>带着参数和偏好沟通，不把商家内容堆到首页</strong>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>&copy; 2026 铮铮眼镜 | <a href="https://zhengzhengstudio.cn">铮铮实验室</a></p>
+        </footer>
+    </div>
+
+    <script src="home.js?v=20260519-serverchat1"></script>
+</body>
+</html>

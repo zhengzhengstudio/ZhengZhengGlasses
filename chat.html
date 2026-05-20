@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="铮铮眼镜顾客与商家的配镜沟通页。">
+    <title>铮铮眼镜 - 配镜沟通</title>
+    <link rel="stylesheet" href="style.css?v=20260519-serverchat1">
+</head>
+<body class="home-page chat-page">
+    <div class="glasses-container home-container">
+        <header class="site-header home-header">
+            <div class="header-top">
+                <a href="./index.html" class="logo" aria-label="铮铮眼镜首页">
+                    <span class="logo-mark">
+                        <img src="assets/glasses-frame-ai-39.png?v=20260517-ai80" alt="">
+                    </span>
+                    <span>铮铮眼镜</span>
+                </a>
+                <nav class="top-nav" aria-label="页面导航">
+                    <a href="./index.html">首页</a>
+                    <a href="./onboard.html">录入信息</a>
+                    <a href="./customer.html">试戴工作台</a>
+                </nav>
+                <div class="user-section" id="chat-user-section">
+                    <span>匿名用户</span>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <section class="chat-product-bar" aria-label="沟通台状态">
+                <div>
+                    <span>当前用户</span>
+                    <strong id="chat-product-user">匿名用户</strong>
+                </div>
+                <div>
+                    <span>数据状态</span>
+                    <strong id="chat-product-data">未采集</strong>
+                </div>
+                <div>
+                    <span>心愿单</span>
+                    <strong id="chat-product-wishlist">0 款</strong>
+                </div>
+                <div>
+                    <span>沟通阶段</span>
+                    <strong id="chat-product-stage">待选择商家</strong>
+                </div>
+            </section>
+
+            <section class="chat-shell chat-wechat-shell">
+                <aside class="chat-contact-rail" aria-label="会话与商家">
+                    <div class="chat-rail-head">
+                        <div>
+                            <p class="eyebrow">会话</p>
+                            <h1>配镜沟通</h1>
+                        </div>
+                        <span id="chat-sync-state">本地缓存</span>
+                    </div>
+                    <button class="btn btn-primary full-width" type="button" onclick="startNewConversation()">新建配镜沟通</button>
+                    <div class="chat-filter-tabs" aria-label="会话筛选">
+                        <button class="active" type="button" onclick="setChatFilter(this, 'all')">全部</button>
+                        <button type="button" onclick="setChatFilter(this, 'merchant')">商家</button>
+                        <button type="button" onclick="setChatFilter(this, 'wishlist')">心愿单</button>
+                    </div>
+                    <label class="chat-search">
+                        <span>搜索或添加商家</span>
+                        <input id="merchant-search" type="search" placeholder="搜商家、镜框风格、材质" oninput="handleMerchantSearch()">
+                    </label>
+                    <div class="chat-contact-list" id="chat-conversation-list"></div>
+                    <div class="chat-merchant-section">
+                        <div class="chat-section-title">
+                            <strong>推荐商家</strong>
+                            <button type="button" onclick="loadMerchantCandidates()">刷新</button>
+                        </div>
+                        <div class="chat-merchant-results" id="chat-merchant-results"></div>
+                    </div>
+                </aside>
+
+                <section class="chat-panel chat-main-panel" aria-label="聊天窗口">
+                    <div class="chat-window-head">
+                        <div>
+                            <strong id="chat-conversation-title">选择商家开始沟通</strong>
+                            <span id="chat-conversation-subtitle">可以按当前镜框匹配商家，也可以和 Kimi 配镜顾问先整理需求。</span>
+                            <div class="chat-header-meta" id="chat-header-meta"></div>
+                        </div>
+                        <button class="btn btn-secondary" type="button" onclick="sendReportPackage()">发送采集包</button>
+                    </div>
+                    <div class="chat-thread" id="chat-thread"></div>
+                    <div class="chat-quick-replies" aria-label="常用问题">
+                        <button type="button" onclick="sendQuickQuestion('这副镜框的鼻托能不能调高？如果鼻梁容易压，需要换哪种鼻托？')">鼻托</button>
+                        <button type="button" onclick="sendQuickQuestion('请帮我判断镜腿长度是否合适，耳后会不会压。')">镜腿</button>
+                        <button type="button" onclick="sendQuickQuestion('如果度数比较高，这个镜圈宽度会不会让镜片太厚？')">镜片厚度</button>
+                        <button type="button" onclick="sendQuickQuestion('我想定制镜框，请告诉我需要补哪些参数和预计流程。')">定制</button>
+                    </div>
+                    <form class="chat-input-row" onsubmit="sendChatMessage(event)">
+                        <input id="chat-input" type="text" placeholder="输入消息，按 Enter 发送">
+                        <button class="btn btn-primary" type="submit">发送</button>
+                    </form>
+                </section>
+
+                <aside class="chat-info-panel" aria-label="配镜信息栏">
+                    <div class="chat-info-card">
+                        <p class="eyebrow">当前信息</p>
+                        <div class="home-data-grid compact-chat-data">
+                            <div><span>用户</span><strong id="chat-user-name">匿名用户</strong></div>
+                            <div><span>商家</span><strong id="chat-merchant-name">未选择</strong></div>
+                            <div><span>脸型</span><strong id="chat-face-shape">-</strong></div>
+                            <div><span>瞳距</span><strong id="chat-pd">-</strong></div>
+                            <div><span>镜圈</span><strong id="chat-lens-width">-</strong></div>
+                            <div><span>当前镜框</span><strong id="chat-frame-name">未选择</strong></div>
+                        </div>
+                    </div>
+                    <div class="chat-info-card">
+                        <p class="eyebrow">快捷工具</p>
+                        <div class="chat-tools">
+                            <button class="btn btn-secondary" type="button" onclick="sendReportPackage()">发送最近采集数据</button>
+                            <button class="btn btn-primary" type="button" onclick="sendCustomRequest()">发起定制沟通</button>
+                            <button class="btn btn-secondary" type="button" onclick="sendWishlistPackage()">发送心愿单</button>
+                            <button class="btn btn-secondary" type="button" onclick="sendPrescriptionChecklist()">验光单清单</button>
+                        </div>
+                    </div>
+                    <div class="chat-info-card chat-prescription-card">
+                        <p class="eyebrow">验光单</p>
+                        <div class="chat-prescription-summary" id="chat-prescription-summary">还没有填写验光数据。</div>
+                        <div class="chat-prescription-grid">
+                            <label><span>右眼 SPH</span><input id="chat-od-sphere" type="text" inputmode="decimal" placeholder="-3.50" oninput="saveChatPrescription(false)"></label>
+                            <label><span>右眼 CYL</span><input id="chat-od-cylinder" type="text" inputmode="decimal" placeholder="-0.75" oninput="saveChatPrescription(false)"></label>
+                            <label><span>右眼轴位</span><input id="chat-od-axis" type="number" min="0" max="180" placeholder="180" oninput="saveChatPrescription(false)"></label>
+                            <label><span>左眼 SPH</span><input id="chat-os-sphere" type="text" inputmode="decimal" placeholder="-3.25" oninput="saveChatPrescription(false)"></label>
+                            <label><span>左眼 CYL</span><input id="chat-os-cylinder" type="text" inputmode="decimal" placeholder="-0.50" oninput="saveChatPrescription(false)"></label>
+                            <label><span>左眼轴位</span><input id="chat-os-axis" type="number" min="0" max="180" placeholder="175" oninput="saveChatPrescription(false)"></label>
+                            <label><span>瞳距 PD</span><input id="chat-rx-pd" type="number" min="45" max="80" placeholder="63" oninput="saveChatPrescription(false)"></label>
+                            <label><span>瞳高</span><input id="chat-rx-height" type="number" min="15" max="45" placeholder="28" oninput="saveChatPrescription(false)"></label>
+                            <label><span>镜片方案</span><input id="chat-rx-lens-type" type="text" placeholder="1.67 防蓝光" oninput="saveChatPrescription(false)"></label>
+                            <label class="wide"><span>备注</span><input id="chat-rx-note" type="text" placeholder="如高度数、渐进、多焦点或医院建议" oninput="saveChatPrescription(false)"></label>
+                        </div>
+                        <div class="chat-tools two-col">
+                            <button class="btn btn-secondary" type="button" onclick="saveChatPrescription(true)">保存</button>
+                            <button class="btn btn-primary" type="button" onclick="sendPrescriptionPackage()">发送给商家</button>
+                        </div>
+                    </div>
+                    <div class="chat-info-card">
+                        <p class="eyebrow">当前镜框</p>
+                        <div class="chat-frame-card" id="chat-frame-card"></div>
+                    </div>
+                    <div class="chat-info-card">
+                        <p class="eyebrow">沟通清单</p>
+                        <div class="chat-checklist" id="chat-checklist"></div>
+                    </div>
+                </aside>
+            </section>
+        </main>
+    </div>
+
+    <script src="chat.js?v=20260519-serverchat1"></script>
+</body>
+</html>

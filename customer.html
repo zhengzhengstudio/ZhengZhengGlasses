@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="铮铮眼镜为戴镜人士提供在线脸型识别、配镜参数分析、镜框推荐与定制参考。">
+    <title>铮铮眼镜 - 客户试戴流程</title>
+    <link rel="stylesheet" href="style.css?v=20260520-tryonfix1">
+</head>
+<body class="customer-page">
+    <div class="glasses-container">
+        <header class="site-header">
+            <div class="header-top">
+                <a href="./index.html" class="logo" aria-label="铮铮眼镜首页">
+                    <span class="logo-mark">
+                        <img src="assets/glasses-frame-round-v3.png" alt="">
+                    </span>
+                    <span>铮铮眼镜</span>
+                </a>
+                <nav class="top-nav" aria-label="页面导航">
+                    <a href="./index.html">首页</a>
+                    <a href="#user-dashboard">开始试戴</a>
+                    <a href="#modeling-system">怎么判断</a>
+                    <a href="#recommendations">镜框推荐</a>
+                </nav>
+                <div class="user-section" id="user-section">
+                    <button class="btn btn-secondary" onclick="goToLogin()">登录</button>
+                    <button class="btn btn-primary" onclick="goToRegister()">注册</button>
+                </div>
+            </div>
+
+            <section class="hero-section" id="hero-section">
+                <div class="hero-copy">
+                    <p class="eyebrow">先在家看合不合脸</p>
+                    <h1>把镜框戴上脸之前，先在线试一遍。</h1>
+                    <p class="hero-lead">上传正面照，或直接打开摄像头。页面会用 MediaPipe 识别人脸关键点，把镜框叠到脸上，再测算镜圈宽度、鼻梁宽、瞳距与移心量。</p>
+                    <div class="hero-actions">
+                        <a class="btn btn-primary btn-large" href="#user-dashboard">现在就试一副</a>
+                        <button class="btn btn-secondary btn-large" id="hero-login-action" onclick="goToLogin()">登录保存结果</button>
+                    </div>
+                    <div class="trust-row" aria-label="平台能力">
+                        <span>468 点人脸网格</span>
+                        <span>左右上下张嘴采集</span>
+                        <span>眼镜实时叠加</span>
+                        <span>参数可手动校准</span>
+                    </div>
+                </div>
+                <div class="hero-visual" aria-label="镜框图片预览">
+                    <figure class="hero-product-card">
+                        <img src="assets/glasses-frame-ai-01.png?v=20260517-ai80" alt="当前可试戴镜框">
+                        <figcaption>
+                            <span>单镜试戴</span>
+                            <strong>先选一副，再换下一副</strong>
+                        </figcaption>
+                    </figure>
+                </div>
+            </section>
+
+            <div class="user-mode-toggle" id="mode-toggle" style="display: none;" aria-hidden="true"></div>
+        </header>
+
+        <main>
+            <section class="login-prompt" id="login-prompt">
+                <div>
+                    <p class="eyebrow">体验完整功能</p>
+                    <h2>先试戴也可以，登录后再保存结果。</h2>
+                    <p>照片和摄像头识别会先在本机完成。觉得结果靠谱，再登录保存脸型参数、偏好和定制记录。</p>
+                </div>
+                <div class="login-buttons">
+                    <button class="btn btn-primary btn-large" onclick="goToLogin()">登录 / 注册</button>
+                </div>
+            </section>
+
+            <section class="user-dashboard" id="user-dashboard">
+                <div class="section-heading compact dashboard-heading">
+                    <div>
+                        <p class="eyebrow">现在就试一副</p>
+                        <h2>可以拍正脸照，也可以像人脸验证一样多角度采集。</h2>
+                    </div>
+                    <div class="text-size-controls" aria-label="文字大小">
+                        <span>文字</span>
+                        <button type="button" onclick="changeTextScale(-0.05)">A-</button>
+                        <strong id="text-scale-value">100%</strong>
+                        <button type="button" onclick="changeTextScale(0.05)">A+</button>
+                    </div>
+                </div>
+                <div class="dashboard-workspace">
+                    <div class="dashboard-card customer-section active tryon-panel" id="customer-dashboard">
+                        <div class="card-heading">
+                            <div>
+                                <p class="eyebrow">先看看合不合脸</p>
+                                <h3>脸型识别与镜框预览</h3>
+                            </div>
+                            <span class="model-state" id="model-state">待上传</span>
+                        </div>
+                        <div class="three-d-preview" id="face-preview" ondrop="handlePhotoDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                            <div class="model-guide" id="face-preview-placeholder">
+                                <strong>还没有采集人脸</strong>
+                                <span>上传照片或完成摄像头采集后，这里才会显示真实人脸、关键点、试戴眼镜和本次数据。</span>
+                            </div>
+                            <div class="face-result-layout" id="face-result-layout" style="display: none;">
+                                <div class="face-result-media">
+                                    <img id="face-preview-image" class="reference-photo" alt="采集到的人脸图" />
+                                    <canvas id="face-overlay-canvas"></canvas>
+                                </div>
+                                <div class="face-result-data">
+                                    <div><span>识别状态</span><strong id="recognition-status">等待照片</strong></div>
+                                    <div><span>置信度</span><strong id="recognition-confidence">-</strong></div>
+                                    <div><span>采集进度</span><strong id="recognition-progress">0%</strong></div>
+                                    <div><span>脸型</span><strong id="preview-face-shape">-</strong></div>
+                                    <div><span>瞳距</span><strong id="preview-pd">-</strong></div>
+                                    <div><span>镜圈建议</span><strong id="preview-lens-width">-</strong></div>
+                                </div>
+                            </div>
+                            <div class="face-preview-controls">
+                                <button class="icon-toggle active" type="button" onclick="togglePreviewKeypoints(this)">关键点</button>
+                                <button class="icon-toggle active" type="button" onclick="togglePreviewGlasses(this)">眼镜</button>
+                            </div>
+                        </div>
+                        <div class="tryon-adjust-panel" aria-label="试戴显示设置">
+                            <div>
+                                <strong>试戴显示设置</strong>
+                                <span>单帧不贴合时，先微调眼镜位置和大小。</span>
+                            </div>
+                            <label>
+                                <span>大小 <b id="preview-scale-value">100%</b></span>
+                                <input id="preview-glasses-scale" type="range" min="55" max="175" value="100" oninput="updatePreviewGlassesControl('scale', this.value)">
+                            </label>
+                            <label>
+                                <span>左右 <b id="preview-x-value">0px</b></span>
+                                <input id="preview-glasses-x" type="range" min="-90" max="90" value="0" oninput="updatePreviewGlassesControl('x', this.value)">
+                            </label>
+                            <label>
+                                <span>上下 <b id="preview-y-value">0px</b></span>
+                                <input id="preview-glasses-y" type="range" min="-90" max="90" value="0" oninput="updatePreviewGlassesControl('y', this.value)">
+                            </label>
+                            <label>
+                                <span>旋转 <b id="preview-rotation-value">0°</b></span>
+                                <input id="preview-glasses-rotation" type="range" min="-18" max="18" value="0" oninput="updatePreviewGlassesControl('rotation', this.value)">
+                            </label>
+                            <button class="btn btn-secondary" type="button" onclick="requestKimiTryOnCorrection()">Kimi 校正</button>
+                            <button class="btn btn-secondary" type="button" onclick="resetPreviewGlassesControls()">重置</button>
+                        </div>
+                        <input type="file" id="face-photo-input" style="display: none;" accept="image/jpeg,image/png,image/jpg" onchange="previewFacePhoto(this)">
+                        <div class="model-actions">
+                            <button class="btn btn-secondary" onclick="retakeFacePhoto()">重新拍摄</button>
+                            <button class="btn btn-primary" onclick="startFaceModeling()">手动补充参数</button>
+                            <button class="btn btn-secondary" onclick="recalibrateCurrentFace()">重新校准</button>
+                        </div>
+                        <div class="recognition-tips">
+                            <span>正脸</span>
+                            <span>露出耳朵</span>
+                            <span>光线均匀</span>
+                            <span>不要用页面截图</span>
+                        </div>
+                        <div class="size-calibration-inline" aria-label="尺寸校准">
+                            <div>
+                                <strong>尺寸不准时先校准</strong>
+                                <span>填验光单瞳距最有用；没有瞳距时再填脸宽。</span>
+                            </div>
+                            <label>
+                                <span>瞳距 mm</span>
+                                <input type="number" id="quick-pd-input" min="45" max="80" placeholder="如 60">
+                            </label>
+                            <label>
+                                <span>脸宽 mm</span>
+                                <input type="number" id="quick-face-width-input" min="110" max="180" placeholder="如 136">
+                            </label>
+                            <label>
+                                <span>鼻梁 mm</span>
+                                <input type="number" id="quick-bridge-width-input" min="12" max="26" placeholder="如 18">
+                            </label>
+                            <button class="btn btn-secondary" type="button" onclick="rerunAnalysis()">按这个校准</button>
+                        </div>
+                        <div class="mediapipe-camera-panel">
+                            <div class="camera-toolbar">
+                                <div>
+                                    <p class="eyebrow">多角度采集</p>
+                                    <h4>像人脸验证一样转头、抬头、张嘴、眨眼</h4>
+                                </div>
+                                <span id="mediapipe-camera-status">未启动</span>
+                            </div>
+                            <div class="camera-stage">
+                                <video id="mediapipe-video" muted playsinline></video>
+                                <canvas id="mediapipe-overlay"></canvas>
+                                <div class="camera-empty">允许摄像头后，可实时叠加镜框并采集脸型关键帧</div>
+                            </div>
+                            <div class="camera-action-guide" id="camera-action-guide">
+                                <span id="camera-action-step">准备开始</span>
+                                <strong id="camera-action-title">保持脸在画面中央</strong>
+                                <small id="camera-action-detail">点击“多角度采集”，按提示完成正脸、左右、上下、张嘴和眨眼。</small>
+                            </div>
+                            <div class="action-capture-panel">
+                                <div class="action-capture-head">
+                                    <strong id="action-capture-prompt">等待开始多角度采集</strong>
+                                    <div class="action-metrics">
+                                        <span>左右 <b id="action-yaw">-</b></span>
+                                        <span>上下 <b id="action-pitch">-</b></span>
+                                        <span>张嘴 <b id="action-mouth">-</b></span>
+                                        <span>眨眼 <b id="action-blink">-</b></span>
+                                    </div>
+                                </div>
+                                <div class="action-capture-steps" id="action-capture-steps">
+                                    <span>看镜头</span>
+                                    <span>左转</span>
+                                    <span>右转</span>
+                                    <span>抬头</span>
+                                    <span>低头</span>
+                                    <span>张嘴</span>
+                                    <span>眨眼</span>
+                                </div>
+                            </div>
+                            <div class="camera-controls">
+                                <button class="btn btn-primary" onclick="startMediapipeCamera()">启动摄像机</button>
+                                <button class="btn btn-secondary" onclick="captureMediapipeModel()">单张生成</button>
+                                <button class="btn btn-secondary" onclick="exportTryOnSnapshot()">保存试戴图</button>
+                                <button class="btn btn-secondary" onclick="openTryOnSnapshot()">长按保存图</button>
+                                <button class="btn btn-primary" onclick="startActionCapture()">多角度采集</button>
+                                <button class="btn btn-secondary" onclick="stopMediapipeCamera()">停止</button>
+                                <button class="icon-toggle" type="button" onclick="toggleCameraFacing(this)" title="切换前后置摄像头">切换</button>
+                                <button class="icon-toggle active" type="button" onclick="toggleMediapipeMesh(this)" title="显示/隐藏人脸网格">网格</button>
+                                <button class="icon-toggle active" type="button" onclick="toggleMediapipeGlasses(this)" title="显示/隐藏眼镜">眼镜</button>
+                                <select id="mediapipe-glasses-style" onchange="setMediapipeGlasses(this.value)" aria-label="当前试戴镜框">
+                                    <option value="">加载镜框中</option>
+                                </select>
+                                <button class="btn btn-secondary wishlist-inline-action" type="button" data-selected-wishlist-action onclick="addSelectedFrameToWishlist()">加入心愿单</button>
+                                <button class="btn btn-secondary wishlist-inline-action" type="button" data-selected-wishlist-remove onclick="removeSelectedFrameFromWishlist()">移出心愿单</button>
+                            </div>
+                            <div class="camera-fit-controls" aria-label="实时试戴调节">
+                                <button class="btn btn-secondary" type="button" onclick="autoScaleSelectedGlasses()">自动缩放</button>
+                                <label>
+                                    <span>大小 <b id="camera-scale-value">100%</b></span>
+                                    <input id="camera-glasses-scale" type="range" min="55" max="175" value="100" oninput="updatePreviewGlassesControl('scale', this.value)">
+                                </label>
+                                <label>
+                                    <span>左右 <b id="camera-x-value">0px</b></span>
+                                    <input id="camera-glasses-x" type="range" min="-90" max="90" value="0" oninput="updatePreviewGlassesControl('x', this.value)">
+                                </label>
+                                <label>
+                                    <span>上下 <b id="camera-y-value">0px</b></span>
+                                    <input id="camera-glasses-y" type="range" min="-90" max="90" value="0" oninput="updatePreviewGlassesControl('y', this.value)">
+                                </label>
+                                <label>
+                                    <span>旋转 <b id="camera-rotation-value">0°</b></span>
+                                    <input id="camera-glasses-rotation" type="range" min="-18" max="18" value="0" oninput="updatePreviewGlassesControl('rotation', this.value)">
+                                </label>
+                                <button class="btn btn-secondary" type="button" onclick="requestKimiTryOnCorrection()">Kimi 校正</button>
+                                <button class="btn btn-secondary" type="button" onclick="resetPreviewGlassesControls()">重置</button>
+                            </div>
+                            <div class="tryon-strip" id="tryon-strip" aria-label="可横向滑动选择镜框">
+                                <p class="text-dim">镜框加载中...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-card customer-section active analysis-card">
+                        <h3>适合你的尺寸</h3>
+                        <div class="stat-item">
+                            <span class="stat-label">脸型</span>
+                            <span class="stat-value" id="face-shape">待分析</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">脸宽</span>
+                            <span class="stat-value" id="face-width">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">瞳距</span>
+                            <span class="stat-value" id="pd">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">建议镜圈宽度</span>
+                            <span class="stat-value" id="rec-width">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">鼻梁/鼻托建议</span>
+                            <span class="stat-value" id="bridge-fit">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">镜腿建议</span>
+                            <span class="stat-value" id="temple-fit">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">适配评分</span>
+                            <span class="stat-value" id="fit-score">-</span>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-card customer-section active preference-card">
+                        <h3>你喜欢怎样戴</h3>
+                        <div class="preference-grid">
+                            <label>
+                                <span>风格偏好</span>
+                                <select id="style-preference" onchange="refreshLocalAnalysis()">
+                                    <option value="daily">日常百搭</option>
+                                    <option value="business">通勤商务</option>
+                                    <option value="light">轻量舒适</option>
+                                    <option value="fashion">个性时尚</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span>材质偏好</span>
+                                <select id="material-preference" onchange="refreshLocalAnalysis()">
+                                    <option value="mixed">不限材质</option>
+                                    <option value="titanium">钛/β钛</option>
+                                    <option value="acetate">板材</option>
+                                    <option value="tr90">TR90</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span>佩戴场景</span>
+                                <select id="usage-preference" onchange="refreshLocalAnalysis()">
+                                    <option value="screen">长时间看屏幕</option>
+                                    <option value="outdoor">户外通勤</option>
+                                    <option value="reading">阅读学习</option>
+                                    <option value="sports">轻运动</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span>敏感点</span>
+                                <select id="comfort-preference" onchange="refreshLocalAnalysis()">
+                                    <option value="nose">容易压鼻梁</option>
+                                    <option value="temple">容易夹太阳穴</option>
+                                    <option value="slide">容易下滑</option>
+                                    <option value="none">暂无明显敏感点</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-card customer-section active analysis-report-card">
+                        <div class="card-heading">
+                            <h3>试戴结论</h3>
+                            <div class="report-actions">
+                                <button class="btn btn-secondary" data-export-action onclick="exportGlassesReportJSON()" disabled>下载 JSON</button>
+                                <button class="btn btn-secondary" data-export-action onclick="exportGlassesFlowHTML()" disabled>导出流程页</button>
+                                <button class="btn btn-secondary" data-export-action onclick="exportGlassesReportImage()" disabled>导出图片</button>
+                                <button class="btn btn-primary" data-export-action onclick="openGlassesReportImage()" disabled>长按保存</button>
+                            </div>
+                        </div>
+                        <div class="analysis-report" id="analysis-report">
+                            <p class="text-dim">完成识别后，这里会生成尺寸、舒适度、风格和定制建议。</p>
+                        </div>
+                        <div class="prescription-panel" aria-label="验光单选填">
+                            <div class="prescription-head">
+                                <div>
+                                    <p class="eyebrow">验光单（选填）</p>
+                                    <h4>正式下单前需要补充医院或门店验光数据。</h4>
+                                </div>
+                                <span id="prescription-summary">选填。可以先不填，正式下单前再把医院验光数据补给商家。</span>
+                            </div>
+                            <div class="prescription-grid">
+                                <label><span>右眼球镜 SPH</span><input id="od-sphere" type="text" inputmode="decimal" placeholder="如 -3.50" oninput="savePrescriptionData(false)"></label>
+                                <label><span>右眼散光 CYL</span><input id="od-cylinder" type="text" inputmode="decimal" placeholder="如 -0.75" oninput="savePrescriptionData(false)"></label>
+                                <label><span>右眼轴位 AXIS</span><input id="od-axis" type="number" min="0" max="180" placeholder="如 180" oninput="savePrescriptionData(false)"></label>
+                                <label><span>左眼球镜 SPH</span><input id="os-sphere" type="text" inputmode="decimal" placeholder="如 -3.25" oninput="savePrescriptionData(false)"></label>
+                                <label><span>左眼散光 CYL</span><input id="os-cylinder" type="text" inputmode="decimal" placeholder="如 -0.50" oninput="savePrescriptionData(false)"></label>
+                                <label><span>左眼轴位 AXIS</span><input id="os-axis" type="number" min="0" max="180" placeholder="如 175" oninput="savePrescriptionData(false)"></label>
+                                <label><span>瞳距 PD</span><input id="rx-pd" type="number" min="45" max="80" placeholder="如 63" oninput="savePrescriptionData(false)"></label>
+                                <label><span>瞳高/镜片高</span><input id="rx-height" type="number" min="15" max="45" placeholder="如 28" oninput="savePrescriptionData(false)"></label>
+                                <label><span>镜片方案</span><input id="rx-lens-type" type="text" placeholder="如 1.67 防蓝光" oninput="savePrescriptionData(false)"></label>
+                                <label class="wide"><span>备注</span><input id="rx-note" type="text" placeholder="如 高度数、渐进、多焦点等" oninput="savePrescriptionData(false)"></label>
+                            </div>
+                            <div class="prescription-actions">
+                                <button class="btn btn-primary" type="button" onclick="savePrescriptionData(true)">保存验光单</button>
+                                <button class="btn btn-secondary" type="button" onclick="clearPrescriptionData()">清空</button>
+                            </div>
+                        </div>
+                        <div class="wishlist-panel" id="wishlist-panel"></div>
+                    </div>
+
+                    <div class="dashboard-card customer-section active recommendations-card">
+                        <h3>可以先看的镜框</h3>
+                        <div class="recommendations" id="recommendations">
+                            <p class="text-center text-dim">完成脸型识别后，将展示适合的镜框与推荐理由。</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="modeling-system-section" id="modeling-system">
+                <div class="section-heading">
+                    <p class="eyebrow">怎么判断合不合脸</p>
+                    <h2>不先给你编参数，识别到照片或摄像头画面后才会出结果。</h2>
+                </div>
+                <div class="modeling-grid modeling-grid-clean">
+                    <article class="modeling-card wide">
+                        <h3>页面实际会看这些点</h3>
+                        <div class="metric-list">
+                            <div><span>人脸网格</span><strong>MediaPipe Face Landmarker 返回 468 个关键点</strong></div>
+                            <div><span>眼距比例</span><strong>用左右眼关键点测算瞳距和镜片中心</strong></div>
+                            <div><span>镜圈宽度</span><strong>按瞳距和鼻梁宽测算 A 尺寸，不把镜架总宽混进来</strong></div>
+                            <div><span>移心量</span><strong>按（镜圈宽度 + 鼻梁宽 - 瞳距）÷ 2 判断是否理想</strong></div>
+                            <div><span>鼻梁区域</span><strong>用鼻梁关键点给出鼻托稳定性建议</strong></div>
+                            <div><span>多角度采集</span><strong>左右、上下、张嘴用于补充侧面和动态数据</strong></div>
+                            <div><span>试戴预览</span><strong>用眼部关键点把镜框叠加到实时画面</strong></div>
+                        </div>
+                    </article>
+                    <article class="modeling-card">
+                        <h3>还没上传前</h3>
+                        <p>页面不再显示固定脸宽、固定瞳距或假推荐值，只显示等待上传、等待摄像机和识别进度。</p>
+                    </article>
+                    <article class="modeling-card">
+                        <h3>识别完成后</h3>
+                        <p>配镜参数、适配报告和镜框推荐会根据真实关键点刷新；如果照片角度不准，可以补充手动参数。</p>
+                    </article>
+                    <article class="modeling-card">
+                        <h3>照片怎么拍更准</h3>
+                        <p>建议使用正面清晰照片，摘帽、露出耳朵和鼻梁。照片只用于生成配镜参数，后续可重新识别。</p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="workflow-section" id="workflow">
+                <div class="section-heading">
+                    <p class="eyebrow">1.0 核心流程</p>
+                    <h2>按这个顺序走，结果会更稳。</h2>
+                </div>
+                <div class="workflow-grid">
+                    <div class="workflow-step">
+                        <span>01</span>
+                        <h3>上传或开摄像机</h3>
+                        <p>使用照片或实时画面提取人脸关键点。</p>
+                    </div>
+                    <div class="workflow-step">
+                        <span>02</span>
+                        <h3>多角度采集</h3>
+                        <p>完成正脸、左右、上下和张嘴采集，提高判断稳定性。</p>
+                    </div>
+                    <div class="workflow-step">
+                        <span>03</span>
+                        <h3>参数校准</h3>
+                        <p>把识别结果转成脸宽、瞳距、鼻托和镜腿建议。</p>
+                    </div>
+                    <div class="workflow-step">
+                        <span>04</span>
+                        <h3>推荐镜框</h3>
+                        <p>根据参数和偏好输出更合适的镜框选择。</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="features-section" id="features-section">
+                <div class="feature-card">
+                    <div class="icon">摄</div>
+                    <h4>摄像机识别</h4>
+                    <p>实时画面提取人脸网格，并直接叠加眼镜预览。</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">动</div>
+                    <h4>多角度采集</h4>
+                    <p>左右、上下和张嘴数据用于补充静态照片不足。</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">参</div>
+                    <h4>参数校准</h4>
+                    <p>识别结果可手动补正，避免单张照片误差过大。</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">镜</div>
+                    <h4>镜框推荐</h4>
+                    <p>根据瞳距、鼻梁宽、镜圈宽度、移心量和佩戴场景给出推荐理由。</p>
+                </div>
+            </section>
+
+            <section class="faq-section">
+                <div class="section-heading">
+                    <p class="eyebrow">常见问题</p>
+                    <h2>先解决戴镜人士最容易犹豫的点。</h2>
+                </div>
+                <div class="faq-grid">
+                    <article>
+                        <h3>照片不够专业可以吗？</h3>
+                        <p>可以先试用。建议正面、光线均匀、无遮挡，系统会结合手动参数进行校正。</p>
+                    </article>
+                    <article>
+                        <h3>推荐结果能直接下单吗？</h3>
+                        <p>1.0 阶段以参数报告、镜框推荐和定制意向为主，最终制作前仍建议确认度数、镜片和材料。</p>
+                    </article>
+                    <article>
+                        <h3>这是真实识别吗？</h3>
+                        <p>是基于 MediaPipe 的本地人脸关键点识别和可视化，不是工业级扫描仪；它适合做在线初筛、推荐和定制前沟通。</p>
+                    </article>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>&copy; 2026 铮铮眼镜 | <a href="https://zhengzhengstudio.cn">铮铮实验室</a></p>
+        </footer>
+    </div>
+
+    <div class="modal-overlay" id="modeling-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>补充脸型参数</h3>
+                <button class="modal-close" onclick="closeModal('modeling-modal')" aria-label="关闭">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>上传正面照片（本地模型会先识别人脸关键点）</label>
+                <div class="upload-preview" id="modal-photo-preview" onclick="document.getElementById('face-photo').click()" ondrop="handleModalDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                    <div class="upload-preview-inner">
+                        <div class="icon">📷</div>
+                        <p>点击或拖拽上传照片</p>
+                    </div>
+                </div>
+                <input type="file" accept="image/*" id="face-photo" style="display: none;" onchange="handleModalPhotoUpload(this)">
+            </div>
+            <div class="form-group">
+                <label>脸宽 (mm)</label>
+                <input type="number" id="face-width-input" placeholder="请输入脸宽">
+            </div>
+            <div class="form-group">
+                <label>瞳距 (mm)</label>
+                <input type="number" id="pd-input" placeholder="请输入瞳距">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>脸长 (mm，可选)</label>
+                    <input type="number" id="face-height-input" placeholder="如 185">
+                </div>
+                <div class="form-group">
+                    <label>鼻梁宽 (mm，可选)</label>
+                    <input type="number" id="bridge-width-input" placeholder="如 18">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>现有镜腿长度 (mm，可选)</label>
+                <input type="number" id="temple-length-input" placeholder="如 145">
+            </div>
+            <button class="btn btn-primary full-width" onclick="submitModeling()">提交分析</button>
+        </div>
+    </div>
+
+    <script src="app.js?v=20260520-tryonfix1"></script>
+</body>
+</html>

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="铮铮眼镜商家沟通台，用于查看顾客参数、订单与定制沟通记录。">
+    <title>商家沟通 - 铮铮眼镜</title>
+    <link rel="stylesheet" href="style.css?v=20260519-serverchat1">
+</head>
+<body class="merchant-page chat-page">
+    <div class="glasses-container home-container">
+        <header class="site-header home-header">
+            <div class="header-top">
+                <a href="./merchant.html" class="logo" aria-label="返回商家后台">
+                    <span class="logo-mark">
+                        <img src="assets/glasses-frame-black-rectangle-v1.png" alt="">
+                    </span>
+                    <span>商家沟通</span>
+                </a>
+                <nav class="top-nav" aria-label="商家沟通导航">
+                    <a href="./merchant.html">商家后台</a>
+                    <a href="./merchant.html#orders">订单</a>
+                    <a href="./index.html">用户页</a>
+                </nav>
+                <div class="user-section" id="merchant-chat-user">
+                    <span>商家用户</span>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <section class="merchant-chat-shell">
+                <aside class="merchant-chat-sidebar">
+                    <div class="card-heading">
+                        <div>
+                            <p class="eyebrow">客户咨询</p>
+                            <h1>按订单处理沟通。</h1>
+                        </div>
+                    </div>
+                    <div class="merchant-chat-orders" id="merchant-chat-orders">
+                        <p class="text-dim">正在读取订单...</p>
+                    </div>
+                </aside>
+
+                <section class="chat-panel merchant-chat-panel" aria-label="商家聊天窗口">
+                    <div class="merchant-order-summary" id="merchant-order-summary">
+                        <p class="text-dim">选择一个订单后，会显示顾客参数和镜框信息。</p>
+                    </div>
+                    <div class="chat-thread" id="merchant-chat-thread"></div>
+                    <form class="chat-input-row" onsubmit="sendMerchantMessage(event)">
+                        <input id="merchant-chat-input" type="text" placeholder="回复顾客：例如鼻托可调、建议换 51mm 镜圈、镜腿可改 145mm">
+                        <button class="btn btn-primary" type="submit">回复</button>
+                    </form>
+                </section>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        let merchantCurrentUser = null;
+        let merchantOrders = [];
+        let selectedMerchantOrderId = '';
+
+        function safeParse(value, fallback = null) {
+            try { return JSON.parse(value || 'null') || fallback; } catch (e) { return fallback; }
+        }
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, s => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[s]));
+        }
+        function setText(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        }
+        function readMerchantUser() {
+            return safeParse(localStorage.getItem('zz_passport_user'), null);
+        }
+        function buildPassportUrl(page) {
+            const redirect = new URL(window.location.href);
+            redirect.searchParams.delete('passport_uid');
+            const url = new URL(`https://zhengzhengstudio.cn/passport/${page}.html`);
+            url.searchParams.set('redirect', redirect.href);
+            url.searchParams.set('from', 'glasses');
+            return url.href;
+        }
+        function readLocalArray(key) {
+            const value = safeParse(localStorage.getItem(key), []);
+            return Array.isArray(value) ? value : [];
+        }
+        function writeLocalArray(key, value) {
+            localStorage.setItem(key, JSON.stringify(value));
+        }
+        function getOrderMessages(orderId) {
+            return readLocalArray(`zz_glasses_chat_${orderId}`);
+        }
+        function saveOrderMessages(orderId, messages) {
+            writeLocalArray(`zz_glasses_chat_${orderId}`, messages);
+        }
+        function getMerchantOrders(uid) {
+            if (!uid) return [];
+            return readLocalArray(`zz_glasses_merchant_orders_${uid}`);
+        }
+        function renderMerchantChatPage() {
+            merchantCurrentUser = readMerchantUser();
+            if (!merchantCurrentUser?.uid) {
+                document.getElementById('merchant-chat-user').innerHTML = `<button class="btn btn-primary" onclick="location.href='${buildPassportUrl('login')}'">商家登录</button>`;
+                document.getElementById('merchant-chat-orders').innerHTML = '<p class="text-dim">请先登录商家账号，再查看客户沟通。</p>';
+                document.getElementById('merchant-chat-thread').innerHTML = '<div class="chat-bubble system">未登录，无法读取商家订单。</div>';
+                return;
+            }
+            const name = merchantCurrentUser.nickname || merchantCurrentUser.username || '商家用户';
+            document.getElementById('merchant-chat-user').innerHTML = `<span>${escapeHtml(name)}</span>`;
+            merchantOrders = getMerchantOrders(merchantCurrentUser.uid);
+            const params = new URLSearchParams(window.location.search);
+            selectedMerchantOrderId = params.get('orderId') || merchantOrders[0]?.id || '';
+            renderMerchantOrderList();
+            renderMerchantConversation();
+        }
+        function renderMerchantOrderList() {
+            const list = document.getElementById('merchant-chat-orders');
+            if (!merchantOrders.length) {
+                list.innerHTML = `
+                    <div class="empty-state">
+                        <p class="text-dim">还没有顾客意向单。顾客加入心愿单或发起定制沟通后，会优先用本机缓存显示在这里；主站接口可用时再同步。</p>
+                        <a class="btn btn-secondary" href="./merchant.html#frames">先维护镜框库</a>
+                    </div>
+                `;
+                return;
+            }
+            list.innerHTML = merchantOrders.map(order => `
+                <button class="merchant-chat-order ${order.id === selectedMerchantOrderId ? 'selected' : ''}" type="button" onclick="selectMerchantOrder('${escapeHtml(order.id)}')">
+                    <span>${escapeHtml(order.customerName || order.contact || '顾客')}</span>
+                    <strong>${escapeHtml(order.glassesName || '定制镜框')}</strong>
+                    <small>${escapeHtml(order.status || 'pending')} · ${new Date(order.createdAt || Date.now()).toLocaleString('zh-CN')}</small>
+                </button>
+            `).join('');
+        }
+        function selectMerchantOrder(orderId) {
+            selectedMerchantOrderId = orderId;
+            const url = new URL(window.location.href);
+            url.searchParams.set('orderId', orderId);
+            history.replaceState(null, '', url.href);
+            renderMerchantOrderList();
+            renderMerchantConversation();
+        }
+        function renderMerchantConversation() {
+            const order = merchantOrders.find(item => item.id === selectedMerchantOrderId);
+            const summary = document.getElementById('merchant-order-summary');
+            const thread = document.getElementById('merchant-chat-thread');
+            if (!order) {
+                summary.innerHTML = '<p class="text-dim">暂无可沟通订单。</p>';
+                thread.innerHTML = '<div class="chat-bubble system">还没有订单消息。</div>';
+                return;
+            }
+            const analysis = order.analysis || {};
+            summary.innerHTML = `
+                <div class="home-data-grid compact-chat-data">
+                    <div><span>顾客</span><strong>${escapeHtml(order.customerName || order.contact || '顾客')}</strong></div>
+                    <div><span>订单</span><strong>${escapeHtml(order.id)}</strong></div>
+                    <div><span>镜框</span><strong>${escapeHtml(order.glassesName || '定制镜框')}</strong></div>
+                    <div><span>状态</span><strong>${escapeHtml(order.status || 'pending')}</strong></div>
+                    <div><span>脸型</span><strong>${escapeHtml(analysis.faceShape || '-')}</strong></div>
+                    <div><span>瞳距</span><strong>${analysis.pd ? `${escapeHtml(analysis.pd)} mm` : '-'}</strong></div>
+                    <div><span>建议镜圈</span><strong>${analysis.recommendedLensWidth ? `${escapeHtml(analysis.recommendedLensWidth)} mm` : '-'}</strong></div>
+                    <div><span>移心量</span><strong>${Number.isFinite(Number(analysis.decentration)) ? `${escapeHtml(analysis.decentration)} mm` : '-'}</strong></div>
+                </div>
+                <p class="text-dim">${escapeHtml(order.customParams || '顾客还没有补充参数。')}</p>
+            `;
+            const messages = getOrderMessages(order.id);
+            if (!messages.length) {
+                const intro = [
+                    { role: 'system', text: `顾客提交了「${order.glassesName || '定制镜框'}」咨询。先核对镜圈宽度、鼻梁宽、移心量和镜腿长度。` },
+                    { role: 'customer', text: order.note || '我想确认这副镜框是否合适，以及是否需要调整鼻托或镜腿。' }
+                ];
+                saveOrderMessages(order.id, intro);
+            }
+            const currentMessages = getOrderMessages(order.id);
+            thread.innerHTML = currentMessages.map(message => {
+                const cls = message.role === 'merchant' ? 'user' : message.role === 'system' ? 'system' : 'merchant';
+                return `<div class="chat-bubble ${cls}">${escapeHtml(message.text)}</div>`;
+            }).join('');
+            thread.scrollTop = thread.scrollHeight;
+        }
+        function sendMerchantMessage(event) {
+            event.preventDefault();
+            const input = document.getElementById('merchant-chat-input');
+            const text = input.value.trim();
+            if (!text || !selectedMerchantOrderId) return;
+            const messages = getOrderMessages(selectedMerchantOrderId);
+            messages.push({
+                role: 'merchant',
+                text,
+                createdAt: new Date().toISOString()
+            });
+            saveOrderMessages(selectedMerchantOrderId, messages);
+            input.value = '';
+            renderMerchantConversation();
+        }
+        renderMerchantChatPage();
+        setInterval(renderMerchantConversation, 1500);
+    </script>
+</body>
+</html>

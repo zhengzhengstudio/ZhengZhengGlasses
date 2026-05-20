@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="铮铮眼镜商家管理中心，支持镜框样板上传、线上订单管理和定制镜框微调。">
+    <title>商家管理 - 铮铮眼镜</title>
+    <link rel="stylesheet" href="style.css?v=20260519-serverchat1">
+</head>
+<body class="merchant-page">
+    <div class="glasses-container">
+        <header class="site-header merchant-hero">
+            <div class="header-top">
+                <a href="index.html" class="logo" aria-label="返回铮铮眼镜">
+                    <span class="logo-mark">
+                        <img src="assets/glasses-frame-black-rectangle-v1.png" alt="">
+                    </span>
+                    <span>铮铮眼镜商家</span>
+                </a>
+                <nav class="top-nav" aria-label="商家导航">
+                    <a href="index.html">用户页</a>
+                    <a href="#frames">镜框库</a>
+                    <a href="#orders">订单</a>
+                    <a href="merchant-chat.html">商家沟通</a>
+                </nav>
+                <div class="user-section">
+                    <button class="btn btn-secondary" onclick="window.location.href='index.html'">返回用户页</button>
+                    <button class="btn btn-secondary" onclick="registerShopMerchant()">注册/编辑商家</button>
+                    <button class="btn btn-primary" onclick="openUploadModal()">上传镜框</button>
+                </div>
+            </div>
+
+            <section class="hero-section merchant-hero-section">
+                <div class="hero-copy">
+                    <p class="eyebrow">线上接单</p>
+                    <h1>把门店镜框样板，变成可被挑选和定制的线上货架。</h1>
+                    <p class="hero-lead">商家可上传镜框样板，查看顾客的脸型参数和定制需求，并在线微调订单方案，让沟通更快、接单更稳。</p>
+                    <div class="hero-actions">
+                        <button class="btn btn-secondary btn-large" onclick="registerShopMerchant()">注册/编辑商家信息</button>
+                        <button class="btn btn-primary btn-large" onclick="openUploadModal()">上传镜框样板</button>
+                        <button class="btn btn-secondary btn-large" onclick="openMerchantChat()">打开商家沟通</button>
+                        <button class="btn btn-secondary btn-large" onclick="loadMerchantData()">刷新数据</button>
+                    </div>
+                </div>
+                <div class="merchant-console" aria-label="商家订单概览">
+                    <div class="console-row">
+                        <span>新订单</span>
+                        <strong id="hero-pending-orders">0</strong>
+                    </div>
+                    <div class="console-row">
+                        <span>镜框样板</span>
+                        <strong id="hero-total-glasses">0</strong>
+                    </div>
+                    <div class="console-note">
+                        <span id="store-name">加载中...</span>
+                        <p>建议为每个镜框补充类型、价格和清晰正面图。</p>
+                    </div>
+                </div>
+            </section>
+        </header>
+
+        <main>
+            <section class="stats-grid" aria-label="商家数据概览">
+                <div class="stat-card">
+                    <div class="value" id="total-orders">0</div>
+                    <div class="label">总订单数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="pending-orders">0</div>
+                    <div class="label">待处理</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="processing-orders">0</div>
+                    <div class="label">处理中</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value" id="completed-orders">0</div>
+                    <div class="label">已完成</div>
+                </div>
+            </section>
+
+            <section class="merchant-layout">
+                <article class="dashboard-card" id="frames">
+                    <div class="card-heading">
+                        <div>
+                            <p class="eyebrow">镜框样板</p>
+                            <h2>我的镜框库</h2>
+                        </div>
+                        <button class="btn btn-primary" onclick="openUploadModal()">新增镜框</button>
+                    </div>
+                    <div class="upload-area compact-upload" onclick="openUploadModal()">
+                        <div class="icon">⬆️</div>
+                        <p>上传镜框图片、名称、类型和价格，方便顾客在线挑选。</p>
+                    </div>
+                    <div class="glasses-grid" id="my-glasses">
+                        <p class="text-center text-dim">正在加载镜框库...</p>
+                    </div>
+                </article>
+
+                <article class="dashboard-card" id="orders">
+                    <div class="card-heading">
+                        <div>
+                            <p class="eyebrow">定制订单</p>
+                            <h2>订单列表</h2>
+                        </div>
+                        <div class="order-controls">
+                            <button class="btn btn-secondary" onclick="loadOrders()">刷新</button>
+                            <select id="order-filter" onchange="loadOrders()" aria-label="订单筛选">
+                                <option value="all">全部订单</option>
+                                <option value="pending">待处理</option>
+                                <option value="processing">处理中</option>
+                                <option value="completed">已完成</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="orders-container" class="order-list">
+                        <p class="text-center text-dim">正在加载订单...</p>
+                    </div>
+                </article>
+            </section>
+        </main>
+    </div>
+
+    <div class="modal-overlay" id="upload-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>上传镜框样板</h3>
+                <button class="modal-close" onclick="closeModal('upload-modal')" aria-label="关闭">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>镜框名称</label>
+                <input type="text" id="glasses-name" placeholder="例如：轻量方圆钛架">
+            </div>
+            <div class="form-group">
+                <label>镜框类型</label>
+                <select id="glasses-type">
+                    <option value="全框">全框</option>
+                    <option value="半框">半框</option>
+                    <option value="无框">无框</option>
+                    <option value="眉镜">眉镜</option>
+                    <option value="飞行员">飞行员</option>
+                    <option value="定制">定制</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>价格 (元)</label>
+                <input type="number" id="glasses-price" placeholder="请输入价格">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>镜圈宽度 (mm)</label>
+                    <input type="number" id="glasses-lens-width" min="45" max="58" placeholder="如 51">
+                </div>
+                <div class="form-group">
+                    <label>鼻梁宽度 (mm)</label>
+                    <input type="number" id="glasses-bridge-size" min="14" max="24" placeholder="如 18">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>镜腿长度 (mm)</label>
+                    <input type="number" id="glasses-temple-length" min="135" max="155" placeholder="如 145">
+                </div>
+                <div class="form-group">
+                    <label>试戴缩放</label>
+                    <input type="number" id="glasses-overlay-scale" min="0.8" max="1.4" step="0.05" placeholder="默认 1">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>上传图片</label>
+                <div class="upload-preview" id="glasses-image-preview" onclick="document.getElementById('glasses-image').click()">
+                    <div class="upload-preview-inner">
+                        <div class="icon">🖼️</div>
+                        <p>点击选择正面透明 PNG 镜框图</p>
+                    </div>
+                </div>
+                <input type="file" id="glasses-image" style="display: none;" accept="image/*" onchange="previewGlassesImage(this)">
+                <p class="form-help">建议上传只有镜框、透明背景、正面横放的图片。系统会按眼部关键点把它叠到摄像头画面上。</p>
+            </div>
+            <button class="btn btn-primary full-width" onclick="submitGlasses()">保存到镜框库</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="adjust-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>微调订单参数</h3>
+                <button class="modal-close" onclick="closeModal('adjust-modal')" aria-label="关闭">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>订单号</label>
+                <input type="text" id="adjust-order-id" readonly>
+            </div>
+            <div class="form-group">
+                <label>微调说明</label>
+                <textarea id="adjust-reason" placeholder="例如：鼻托加高 1mm，镜腿长度调整到 145mm，建议改用轻量材料。" rows="4"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('adjust-modal')">取消</button>
+                <button class="btn btn-primary" onclick="submitAdjustment()">确认微调</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="merchant.js?v=20260519-serverchat1"></script>
+</body>
+</html>
