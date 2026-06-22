@@ -5,7 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="铮铮眼镜顾客与商家的配镜沟通页。">
     <title>铮铮眼镜 - 配镜沟通</title>
-    <link rel="stylesheet" href="style.css?v=20260519-serverchat1">
+    <link rel="icon" href="assets/favicon.png?v=20260621-app3" type="image/png">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=20260621-app3">
+    <link rel="manifest" href="site.webmanifest?v=20260621-app3">
+    <link rel="stylesheet" href="style.css?v=20260621-actionfix1">
 </head>
 <body class="home-page chat-page">
     <div class="glasses-container home-container">
@@ -13,7 +16,7 @@
             <div class="header-top">
                 <a href="./index.html" class="logo" aria-label="铮铮眼镜首页">
                     <span class="logo-mark">
-                        <img src="assets/glasses-frame-ai-39.png?v=20260517-ai80" alt="">
+                        <img src="assets/glasses-frame-ai-39.png?v=20260621-actionfix1" alt="">
                     </span>
                     <span>铮铮眼镜</span>
                 </a>
@@ -67,6 +70,7 @@
                         <span>搜索或添加商家</span>
                         <input id="merchant-search" type="search" placeholder="搜商家、镜框风格、材质" oninput="handleMerchantSearch()">
                     </label>
+                    <button class="btn btn-secondary full-width" type="button" onclick="addManualMerchant()">手动添加商家</button>
                     <div class="chat-contact-list" id="chat-conversation-list"></div>
                     <div class="chat-merchant-section">
                         <div class="chat-section-title">
@@ -94,6 +98,8 @@
                         <button type="button" onclick="sendQuickQuestion('我想定制镜框，请告诉我需要补哪些参数和预计流程。')">定制</button>
                     </div>
                     <form class="chat-input-row" onsubmit="sendChatMessage(event)">
+                        <button class="btn btn-secondary chat-image-button" type="button" onclick="openChatImagePicker()">图片</button>
+                        <input id="chat-image-input" type="file" accept="image/*" hidden onchange="sendChatImage(this)">
                         <input id="chat-input" type="text" placeholder="输入消息，按 Enter 发送">
                         <button class="btn btn-primary" type="submit">发送</button>
                     </form>
@@ -153,6 +159,13 @@
         </main>
     </div>
 
-    <script src="chat.js?v=20260519-serverchat1"></script>
+    <div class="chat-image-viewer" id="chat-image-viewer" aria-hidden="true" onclick="closeChatImageViewer()">
+        <div class="chat-image-viewer-dialog" onclick="event.stopPropagation()">
+            <button type="button" aria-label="关闭图片预览" onclick="closeChatImageViewer()">×</button>
+            <img id="chat-image-viewer-img" alt="聊天图片预览">
+        </div>
+    </div>
+
+    <script src="chat.js?v=20260621-actionfix1"></script>
 </body>
 </html>

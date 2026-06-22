@@ -5,7 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="铮铮眼镜商家管理中心，支持镜框样板上传、线上订单管理和定制镜框微调。">
     <title>商家管理 - 铮铮眼镜</title>
-    <link rel="stylesheet" href="style.css?v=20260519-serverchat1">
+    <link rel="icon" href="assets/favicon.png?v=20260621-app3" type="image/png">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=20260621-app3">
+    <link rel="manifest" href="site.webmanifest?v=20260621-app3">
+    <link rel="stylesheet" href="style.css?v=20260621-actionfix1">
 </head>
 <body class="merchant-page">
     <div class="glasses-container">
@@ -77,6 +80,24 @@
                     <div class="value" id="completed-orders">0</div>
                     <div class="label">已完成</div>
                 </div>
+            </section>
+
+            <section class="merchant-action-strip" aria-label="商家常用操作">
+                <article>
+                    <span>沟通中心</span>
+                    <strong>客户消息、心愿单和定制需求会集中到商家沟通页。</strong>
+                    <button class="btn btn-primary" type="button" onclick="openMerchantChat()">打开沟通</button>
+                </article>
+                <article>
+                    <span>镜框上传标准</span>
+                    <strong>正面横放、透明背景、镜腿展开，填写镜圈宽度、鼻梁和镜腿。</strong>
+                    <button class="btn btn-secondary" type="button" onclick="openUploadModal()">上传样板</button>
+                </article>
+                <article>
+                    <span>接单建议</span>
+                    <strong>先核对瞳距、镜圈、移心量和验光单，再确认是否定制。</strong>
+                    <a class="btn btn-secondary" href="./chat.html">看顾客视角</a>
+                </article>
             </section>
 
             <section class="merchant-layout">
@@ -181,6 +202,52 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="merchant-profile-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>商家入驻信息</h3>
+                <button class="modal-close" onclick="closeModal('merchant-profile-modal')" aria-label="关闭">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>店铺名称</label>
+                <input type="text" id="merchant-store-name" placeholder="例如：铮铮眼镜实验室">
+            </div>
+            <div class="form-group">
+                <label>联系方式</label>
+                <input type="text" id="merchant-contact" placeholder="微信、手机号或邮箱">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>主营风格</label>
+                    <select id="merchant-style">
+                        <option value="日常百搭">日常百搭</option>
+                        <option value="轻量舒适">轻量舒适</option>
+                        <option value="学生配镜">学生配镜</option>
+                        <option value="高度数薄镜片">高度数薄镜片</option>
+                        <option value="3D 打印定制">3D 打印定制</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>接单能力</label>
+                    <select id="merchant-service-type">
+                        <option value="试戴推荐与普通配镜">试戴推荐与普通配镜</option>
+                        <option value="鼻托/镜腿微调">鼻托/镜腿微调</option>
+                        <option value="定制镜框">定制镜框</option>
+                        <option value="镜片方案咨询">镜片方案咨询</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>给顾客看的说明</label>
+                <textarea id="merchant-description" rows="4" placeholder="说明你的服务、适合的人群、定制或验光要求。"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('merchant-profile-modal')">取消</button>
+                <button class="btn btn-primary" onclick="saveShopMerchantProfile()">保存并入驻</button>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="adjust-modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -202,6 +269,6 @@
         </div>
     </div>
 
-    <script src="merchant.js?v=20260519-serverchat1"></script>
+    <script src="merchant.js?v=20260621-actionfix1"></script>
 </body>
 </html>

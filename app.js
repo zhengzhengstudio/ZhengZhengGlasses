@@ -1,5 +1,5 @@
 const API_BASE = 'https://zhengzhengstudio.cn';
-const REMOTE_SHOP_API_ENABLED = localStorage.getItem('zz_glasses_remote_shop_api') === '1';
+const REMOTE_SHOP_API_ENABLED = localStorage.getItem('zz_glasses_remote_shop_api') !== '0';
 let currentUser = null;
 let currentMode = 'customer';
 let isLoggedIn = false;
@@ -13,11 +13,13 @@ let mediapipeCameraController = null;
 let latestCameraResult = null;
 let latestCameraSamples = [];
 let latestPreviewMeshPoints = [];
+let latestCleanCameraFrameDataUrl = null;
 let lastCameraUiUpdateAt = 0;
 const isMobileDevice = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches;
-let cameraMeshEnabled = !isMobileDevice;
+let isCameraStarting = false;
+let cameraMeshEnabled = true;
 let cameraGlassesEnabled = true;
-let cameraFacingMode = 'user';
+let cameraFacingMode = localStorage.getItem('zz_glasses_camera_facing') || 'user';
 let preloadedVideoLandmarker = null;
 let previewKeypointsEnabled = true;
 let previewGlassesEnabled = true;
@@ -25,17 +27,22 @@ let previewGlassesScale = 1;
 let previewGlassesOffsetX = 0;
 let previewGlassesOffsetY = 0;
 let previewGlassesRotation = 0;
+let previewGlassesScaleMode = 'manual';
+let previousTryOnAdjustment = null;
+let tryOnCorrectionRunning = false;
 let appTextScale = Number(localStorage.getItem('zz_glasses_text_scale') || 1);
 let latestTryOnSnapshotDataUrl = null;
 let latestCameraFrameDataUrl = null;
-let cameraGlassesStyle = 'https://glasses.zhengzhengstudio.cn/assets/glasses-frame-ai-01.png?v=20260517-ai80';
+let kimiCorrectionStatus = 'checking';
+let cameraGlassesStyle = 'https://glasses.zhengzhengstudio.cn/assets/glasses-frame-ai-01.png?v=20260621-actionfix1';
 let selectedFrameId = null;
 let selectedFrameImage = null;
 const selectedFrameImageCache = new Map();
 let currentRecommendations = [];
 let recommendationPage = 0;
 const RECOMMENDATIONS_PER_PAGE = 4;
-const FRAME_INDEX_URL = './frame-index.json?v=20260517-ai80';
+const FRAME_INDEX_URL = './frame-index.json?v=20260621-actionfix1';
+const FRAME_3D_INDEX_URL = './frame-3d-index.json?v=20260621-actionfix1';
 const faceActionSteps = [
     { id: 'front', label: '看镜头', hint: '看向屏幕中央，保持一小会儿' },
     { id: 'left', label: '左转', hint: '慢慢向左转头，不要移出画面' },
@@ -46,22 +53,22 @@ const faceActionSteps = [
     { id: 'blink', label: '眨眼', hint: '自然眨一下眼，补充活体动作' }
 ];
 const ACTION_HOLD_FRAMES = {
-    front: 8,
-    left: 6,
-    right: 6,
-    up: 5,
-    down: 5,
-    mouth: 4,
-    blink: 2
+    front: 2,
+    left: 1,
+    right: 1,
+    up: 1,
+    down: 1,
+    mouth: 1,
+    blink: 1
 };
 const ACTION_MIN_STEP_MS = {
-    front: 600,
-    left: 500,
-    right: 500,
-    up: 450,
-    down: 450,
-    mouth: 300,
-    blink: 150
+    front: 180,
+    left: 110,
+    right: 110,
+    up: 110,
+    down: 110,
+    mouth: 100,
+    blink: 80
 };
 const CAMERA_SAMPLE_LIMIT = 18;
 const TEMP_USER_KEY = 'zz_glasses_temp_user';
@@ -110,59 +117,141 @@ const BUILTIN_FRAME_CATALOG = BUILTIN_FRAME_SERIES.map(([number, name, type, pri
 }));
 let indexedFrameCatalog = [];
 let shopFrameCatalog = [];
+let frame3dModels = new Map();
+let frame3dRequestSeq = 0;
 let faceActionCapture = {
     active: false,
     currentIndex: 0,
     frames: [],
     holdCount: 0,
     lastMatchedStep: null,
-    matchedSince: 0
+    matchedSince: 0,
+    baselineAction: null,
+    stepStartedAt: 0,
+    bestFrame: null,
+    candidateFrames: []
 };
 let onboardStepIndex = 1;
+
+const AUTH_RETURN_PARAMS = [
+    'user',
+    'passport_user',
+    'account',
+    'passport_uid',
+    'uid',
+    'user_id',
+    'username',
+    'nickname',
+    'name',
+    'avatar'
+];
+
+function parseMaybeEncodedJson(raw) {
+    if (!raw) return null;
+    const attempts = [];
+    let value = String(raw);
+    for (let i = 0; i < 3; i += 1) {
+        attempts.push(value);
+        try {
+            const decoded = decodeURIComponent(value);
+            if (decoded === value) break;
+            value = decoded;
+        } catch (error) {
+            break;
+        }
+    }
+    for (const candidate of [...new Set(attempts)]) {
+        try {
+            const parsed = JSON.parse(candidate);
+            if (parsed && typeof parsed === 'object') return parsed;
+        } catch (error) {}
+    }
+    return null;
+}
+
+function normalizeAuthUser(user, fallback = {}) {
+    const normalized = {
+        ...user,
+        uid: user?.uid || user?.id || fallback.uid || fallback.id || '',
+        username: user?.username || user?.nickname || user?.name || fallback.username || fallback.nickname || fallback.name || '',
+        nickname: user?.nickname || user?.username || user?.name || fallback.nickname || fallback.username || fallback.name || '',
+        avatar: user?.avatar || fallback.avatar || '',
+        source: user?.source || fallback.source || 'passport'
+    };
+    normalized.temporary = Boolean(user?.temporary || fallback.temporary);
+    return normalized.uid ? normalized : null;
+}
+
+function readAuthUserFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const jsonUser = parseMaybeEncodedJson(params.get('user'))
+        || parseMaybeEncodedJson(params.get('passport_user'))
+        || parseMaybeEncodedJson(params.get('account'));
+    if (jsonUser?.uid || jsonUser?.id) return normalizeAuthUser(jsonUser);
+
+    const uid = params.get('passport_uid') || params.get('uid') || params.get('user_id');
+    if (!uid) return null;
+    return normalizeAuthUser({}, {
+        uid,
+        username: params.get('username') || params.get('nickname') || params.get('name') || '通行证用户',
+        avatar: params.get('avatar') || '',
+        source: 'passport'
+    });
+}
+
+function persistAuthUser(user) {
+    if (!user?.uid) return;
+    if (user.temporary) {
+        sessionStorage.setItem(TEMP_USER_KEY, JSON.stringify(user));
+        return;
+    }
+    localStorage.setItem('zz_passport_user', JSON.stringify(user));
+}
+
+function cleanupAuthReturnParams() {
+    const url = new URL(window.location.href);
+    const hadAuthParam = AUTH_RETURN_PARAMS.some(param => url.searchParams.has(param));
+    if (!hadAuthParam) return;
+    AUTH_RETURN_PARAMS.forEach(param => url.searchParams.delete(param));
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+}
 
 async function init() {
     applyTextScale(appTextScale);
     await loadFrameIndexCatalog();
+    await loadFrame3dIndex();
     await loadShopFrameCatalog();
     ensureSelectedFrame();
     renderFrameSelect();
     renderDefaultRecommendations();
     applySavedPrescription();
-    preloadMediapipe();
+    applyCameraFacingState();
+    preloadMediapipeWhenIdle();
+    checkKimiStatus();
+
+    const ignoreUserParam = sessionStorage.getItem('zz_glasses_ignore_user_param') === '1';
+    const urlUser = ignoreUserParam ? null : readAuthUserFromUrl();
+    if (urlUser?.uid) {
+        currentUser = urlUser;
+        isTemporaryUser = Boolean(urlUser.temporary);
+        isLoggedIn = !isTemporaryUser;
+        persistAuthUser(urlUser);
+        sessionStorage.removeItem('zz_glasses_ignore_user_param');
+        cleanupAuthReturnParams();
+        showUserDashboard();
+    }
 
     const saved = localStorage.getItem('zz_passport_user');
     if (saved) {
         try {
-            currentUser = JSON.parse(saved);
+            currentUser = currentUser?.uid ? currentUser : JSON.parse(saved);
             if (currentUser && currentUser.uid) {
-                isLoggedIn = true;
-                isTemporaryUser = false;
+                isTemporaryUser = Boolean(currentUser.temporary);
+                isLoggedIn = !isTemporaryUser;
                 showUserDashboard();
             }
         } catch (e) {
             console.error('Parse user failed:', e);
-        }
-    }
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const userParam = urlParams.get('user');
-    const ignoreUserParam = sessionStorage.getItem('zz_glasses_ignore_user_param') === '1';
-    if (userParam && !isLoggedIn && !ignoreUserParam) {
-        try {
-            currentUser = JSON.parse(decodeURIComponent(userParam));
-            if (currentUser && currentUser.uid) {
-                isTemporaryUser = Boolean(currentUser.temporary);
-                isLoggedIn = !isTemporaryUser;
-                if (isTemporaryUser) {
-                    sessionStorage.setItem('zz_glasses_temp_user', JSON.stringify(currentUser));
-                } else {
-                    localStorage.setItem('zz_passport_user', JSON.stringify(currentUser));
-                }
-                sessionStorage.removeItem('zz_glasses_ignore_user_param');
-                showUserDashboard();
-            }
-        } catch (e) {
-            console.error('Parse user from URL failed:', e);
         }
     }
 
@@ -179,15 +268,64 @@ async function init() {
     if (!currentUser?.uid) {
         showAnonymousUser();
     }
+    latestTryOnSnapshotDataUrl = readStoredTryOnSnapshot() || latestTryOnSnapshotDataUrl;
 
     updateExportButtons();
     initOnboardFlow();
     carryUserToLinks();
 }
 
+function applyCameraFacingState() {
+    const facingLabel = cameraFacingMode === 'user' ? '前置' : '后置';
+    document.documentElement.dataset.cameraFacing = cameraFacingMode;
+    setTextEverywhere('camera-facing-label', facingLabel);
+    syncCameraControlState();
+}
+
+function syncCameraControlState() {
+    const waitingForModel = Boolean(mediapipeCameraController) && !isMediapipeModelReady();
+    document.querySelectorAll('button[onclick*="toggleMediapipeMesh"]').forEach(button => {
+        button.classList.toggle('active', cameraMeshEnabled);
+        button.setAttribute('aria-pressed', String(cameraMeshEnabled));
+    });
+    document.querySelectorAll('button[onclick*="toggleMediapipeGlasses"]').forEach(button => {
+        button.classList.toggle('active', cameraGlassesEnabled);
+        button.setAttribute('aria-pressed', String(cameraGlassesEnabled));
+    });
+    document.querySelectorAll('button[onclick*="startMediapipeCamera"]').forEach(button => {
+        button.disabled = isCameraStarting;
+        button.classList.toggle('is-loading', isCameraStarting);
+    });
+    document.querySelectorAll('button[onclick*="captureMediapipeModel"], button[onclick*="startActionCapture"]').forEach(button => {
+        button.disabled = isCameraStarting || waitingForModel;
+        button.classList.toggle('is-loading', isCameraStarting || waitingForModel);
+        if (waitingForModel) button.title = '摄像头画面已打开，识别模型正在准备';
+        else button.removeAttribute('title');
+    });
+    setTextEverywhere('camera-facing-label', cameraFacingMode === 'user' ? '前置' : '后置');
+}
+
+function setCameraMeshVisible(visible) {
+    cameraMeshEnabled = Boolean(visible);
+    if (mediapipeCameraController) {
+        mediapipeCameraController.setDrawMesh(cameraMeshEnabled);
+    }
+    syncCameraControlState();
+}
+
+function setCameraGlassesVisible(visible) {
+    cameraGlassesEnabled = Boolean(visible);
+    if (mediapipeCameraController) {
+        mediapipeCameraController.setDrawGlasses(cameraGlassesEnabled);
+        if (cameraGlassesEnabled) {
+            mediapipeCameraController.setGlassesStyle(getCameraGlassesPayload(getSelectedFrame()));
+        }
+    }
+    syncCameraControlState();
+}
+
 function carryUserToLinks() {
-    const rawUser = new URLSearchParams(window.location.search).get('user');
-    const userPayload = rawUser || (currentUser?.uid ? encodeURIComponent(JSON.stringify(currentUser)) : '');
+    const userPayload = currentUser?.uid ? JSON.stringify(currentUser) : '';
     if (!userPayload) return;
     document.querySelectorAll('.carry-user-link').forEach(link => {
         const url = new URL(link.getAttribute('href'), window.location.href);
@@ -203,9 +341,91 @@ function initOnboardFlow() {
 
 function setOnboardStep(delta) {
     if (!document.body.classList.contains('onboard-page')) return;
-    onboardStepIndex = Math.max(1, Math.min(4, onboardStepIndex + delta));
+    if (delta > 0 && onboardStepIndex >= 5) {
+        finishOnboardFlow();
+        return;
+    }
+    saveOnboardStepProgress(false);
+    onboardStepIndex = Math.max(1, Math.min(5, onboardStepIndex + delta));
     renderOnboardStep();
     document.getElementById('onboard-flow')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    saveOnboardStepProgress(false);
+}
+
+function handleOnboardNext() {
+    if (!document.body.classList.contains('onboard-page')) return;
+    if (onboardStepIndex >= 5) {
+        finishOnboardFlow();
+        return;
+    }
+    setOnboardStep(1);
+}
+
+async function finishOnboardFlow() {
+    if (!document.body.classList.contains('onboard-page')) return;
+    if (finishOnboardFlow.isRunning) return;
+    finishOnboardFlow.isRunning = true;
+
+    const nextButton = document.getElementById('onboard-next-button');
+    if (nextButton) {
+        nextButton.disabled = true;
+        nextButton.textContent = '保存中...';
+    }
+
+    try {
+        await getTryOnSnapshotDataUrl().catch(error => {
+            console.warn('Finish snapshot capture failed:', error);
+            return null;
+        });
+        savePrescriptionData(false);
+        saveCustomizationData(false);
+        const homeState = saveGlassesHomeState() || {};
+        const finishedAt = new Date().toISOString();
+        const finishedState = {
+            ...homeState,
+            step: 5,
+            status: 'completed',
+            completedSteps: [1, 2, 3, 4, 5],
+            actionSamples: latestCameraSamples.slice(-CAMERA_SAMPLE_LIMIT),
+            lastCameraImage: latestCameraFrameDataUrl || latestTryOnSnapshotDataUrl || '',
+            finishedAt,
+            updatedAt: finishedAt
+        };
+        localStorage.setItem(`zz_glasses_onboard_progress_${getCurrentUserId() || 'anonymous'}`, JSON.stringify(finishedState));
+        localStorage.setItem('zz_glasses_onboard_progress', JSON.stringify(finishedState));
+        queueServerSync('onboard_completed', finishedState);
+        showToast('配镜流程已完成，正在回到首页');
+
+        const url = new URL('./index.html', window.location.href);
+        if (currentUser?.uid) url.searchParams.set('user', JSON.stringify(currentUser));
+        window.setTimeout(() => {
+            window.location.href = url.href;
+        }, 350);
+    } catch (error) {
+        console.warn('Finish onboard flow failed:', error);
+        showToast('保存完成状态失败，请再试一次');
+        finishOnboardFlow.isRunning = false;
+        renderOnboardNav();
+    }
+}
+
+function renderOnboardNav() {
+    if (!document.body.classList.contains('onboard-page')) return;
+    const prevButton = document.getElementById('onboard-prev-button');
+    const saveButton = document.getElementById('onboard-save-button');
+    const nextButton = document.getElementById('onboard-next-button');
+
+    if (prevButton) {
+        prevButton.disabled = onboardStepIndex <= 1;
+        prevButton.setAttribute('aria-disabled', String(onboardStepIndex <= 1));
+    }
+    if (saveButton) {
+        saveButton.textContent = onboardStepIndex >= 5 ? '保存当前结果' : '保存本步';
+    }
+    if (nextButton) {
+        nextButton.disabled = false;
+        nextButton.textContent = onboardStepIndex >= 5 ? '完成' : '下一步';
+    }
 }
 
 function renderOnboardStep() {
@@ -217,7 +437,8 @@ function renderOnboardStep() {
         step.classList.toggle('active', n === onboardStepIndex);
         step.classList.toggle('done', n < onboardStepIndex);
     });
-    setText('onboard-step-label', `第 ${onboardStepIndex} 步 / 共 4 步`);
+    setText('onboard-step-label', `第 ${onboardStepIndex} 步 / 共 5 步`);
+    renderOnboardNav();
 
     const loginPrompt = document.getElementById('login-prompt');
     const dashboard = document.getElementById('user-dashboard');
@@ -235,25 +456,55 @@ function renderOnboardStep() {
     show('.analysis-card', onboardStepIndex === 4, 'grid');
     show('.preference-card', onboardStepIndex === 3);
     show('.recommendations-card', onboardStepIndex === 3);
-    show('.analysis-report-card', onboardStepIndex === 4);
+    show('.analysis-report-card', onboardStepIndex === 4 || onboardStepIndex === 5);
+    show('.customization-card', onboardStepIndex === 5);
 
     if (onboardStepIndex === 2) {
-        cameraGlassesEnabled = false;
-        if (mediapipeCameraController) mediapipeCameraController.setDrawGlasses(false);
+        setCameraMeshVisible(true);
+        setCameraGlassesVisible(false);
+        renderFrameSelect();
+        syncCameraControlState();
     }
     if (onboardStepIndex === 3) {
-        cameraGlassesEnabled = true;
-        if (mediapipeCameraController) {
-            mediapipeCameraController.setDrawGlasses(true);
-            mediapipeCameraController.setGlassesStyle(getCameraGlassesPayload(getSelectedFrame()));
-        }
+        setCameraMeshVisible(false);
+        setCameraGlassesVisible(true);
+        renderFrameSelect();
+        refreshCameraGlassesPayload();
     }
-    if (onboardStepIndex === 4) {
-        captureLatestCameraSnapshot();
-        stopMediapipeCamera();
+    if (onboardStepIndex === 4 || onboardStepIndex === 5) {
+        if (!latestCameraFrameDataUrl && !latestCleanCameraFrameDataUrl) captureLatestCameraSnapshot();
+        stopMediapipeCamera({ capture: false });
+        setCameraGlassesVisible(false);
         renderAnalysisReport(latestAnalysis || buildAnalysis({ source: 'manual' }));
         renderWishlistPanel();
     }
+    if (onboardStepIndex === 5) {
+        fillCustomizationFromAnalysis(false);
+        renderFrame3DPreview();
+    }
+}
+
+async function checkKimiStatus() {
+    updateKimiCorrectionButtons('Kimi/本地校正');
+    try {
+        const response = await fetch(`${API_BASE}/api/glasses/chat/kimi/status`, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`status ${response.status}`);
+        const data = await response.json();
+        kimiCorrectionStatus = data.enabled ? 'kimi' : 'local';
+        updateKimiCorrectionButtons(data.enabled ? 'Kimi 校正' : '本地校正');
+    } catch (error) {
+        kimiCorrectionStatus = 'local';
+        updateKimiCorrectionButtons('本地校正');
+    }
+}
+
+function updateKimiCorrectionButtons(label) {
+    document.querySelectorAll('[data-kimi-correct]').forEach(button => {
+        button.textContent = label;
+        button.title = label === 'Kimi 校正'
+            ? '调用服务端 Kimi 接口校正镜框位置'
+            : '服务端 Kimi 未配置或暂不可用，使用本地规则校正';
+    });
 }
 
 function renderOnboardStepCopy() {
@@ -277,9 +528,15 @@ function renderOnboardStepCopy() {
         },
         4: {
             eyebrow: '第 4 步',
-            title: '报告与沟通：核对参数、心愿单和要发给商家的内容。',
+            title: '报告与导出：核对参数、心愿单和实拍试戴图。',
             cardEyebrow: '采集完成',
             cardTitle: '配镜报告'
+        },
+        5: {
+            eyebrow: '第 5 步',
+            title: '保存与定制：先保存本次试戴图，再把尺寸发给商家。',
+            cardEyebrow: '定制确认',
+            cardTitle: '定制镜框参数'
         }
     }[onboardStepIndex];
     if (!copy) return;
@@ -339,7 +596,7 @@ function renderOnboardLoginPrompt() {
 
 async function loadFrameIndexCatalog() {
     try {
-        const response = await fetch(FRAME_INDEX_URL, { cache: 'no-store' });
+        const response = await fetch(FRAME_INDEX_URL, { cache: 'force-cache' });
         if (!response.ok) throw new Error(`frame index ${response.status}`);
         const data = await response.json();
         indexedFrameCatalog = Array.isArray(data.frames)
@@ -348,6 +605,19 @@ async function loadFrameIndexCatalog() {
     } catch (error) {
         console.warn('Load frame index failed:', error);
         indexedFrameCatalog = [];
+    }
+}
+
+async function loadFrame3dIndex() {
+    try {
+        const response = await fetch(FRAME_3D_INDEX_URL, { cache: 'force-cache' });
+        if (!response.ok) throw new Error(`frame 3d index ${response.status}`);
+        const data = await response.json();
+        const models = Array.isArray(data.models) ? data.models : [];
+        frame3dModels = new Map(models.map(model => [model.frameId || model.id, model]));
+    } catch (error) {
+        console.warn('Load frame 3d index failed:', error);
+        frame3dModels = new Map();
     }
 }
 
@@ -368,7 +638,7 @@ function normalizeIndexedFrame(item) {
         lensWidth: clampNumber(item.lensWidth || item.eyeSize || 51, 45, 58),
         bridgeSize: clampNumber(item.bridgeSize || item.bridgeWidth || 18, 14, 24),
         templeLength: clampNumber(item.templeLength || 145, 135, 155),
-        overlayScale: clampNumber(item.overlayScale || 1, 0.72, 1.45),
+        overlayScale: clampFloat(item.overlayScale || 1, 0.5, 1.9),
         description: item.description || '',
         source: item.source || 'index'
     };
@@ -379,7 +649,18 @@ async function loadShopFrameCatalog() {
     const localFrames = Array.isArray(window.ZZ_GLASSES_SHOP_CATALOG)
         ? window.ZZ_GLASSES_SHOP_CATALOG
         : [];
-    shopFrameCatalog = [...localFrames, ...storedFrames].map(normalizeShopFrame).filter(Boolean);
+    let remoteFrames = [];
+    if (REMOTE_SHOP_API_ENABLED) {
+        try {
+            const response = await fetch(`${API_BASE}/api/shop/glasses/catalog`, { cache: 'no-store' });
+            if (!response.ok) throw new Error(`shop catalog ${response.status}`);
+            const data = await response.json();
+            remoteFrames = Array.isArray(data.frames) ? data.frames : [];
+        } catch (error) {
+            console.warn('Load remote shop catalog failed, using local frames:', error.message);
+        }
+    }
+    shopFrameCatalog = [...remoteFrames, ...localFrames, ...storedFrames].map(normalizeShopFrame).filter(Boolean);
 }
 
 function normalizeShopFrame(item) {
@@ -400,7 +681,7 @@ function normalizeShopFrame(item) {
         lensWidth: clampNumber(item.lensWidth || item.eyeSize || item.frameSize || 51, 45, 58),
         bridgeSize: clampNumber(item.bridgeSize || item.bridgeWidth || 18, 14, 24),
         templeLength: clampNumber(item.templeLength || 145, 135, 155),
-        overlayScale: clampNumber(item.overlayScale || 1, 0.72, 1.45),
+        overlayScale: clampFloat(item.overlayScale || 1, 0.5, 1.9),
         description: item.description || item.reason || ''
     };
 }
@@ -448,11 +729,14 @@ function getSelectedFrame() {
 }
 
 function toAbsoluteAssetUrl(src = '') {
-    if (!src) return '';
+    const raw = String(src || '').trim();
+    if (!raw) return '';
+    if (/^data:image\/(png|jpe?g|webp);base64,/i.test(raw)) return raw;
     try {
-        return new URL(src, window.location.href).href;
+        const url = new URL(raw, window.location.href);
+        return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
     } catch (e) {
-        return src;
+        return '';
     }
 }
 
@@ -486,6 +770,29 @@ function preloadSelectedFrameImage(frame = getSelectedFrame()) {
     image.src = src;
 }
 
+function ensureSelectedFrameImageReady(frame = getSelectedFrame()) {
+    preloadSelectedFrameImage(frame);
+    if (selectedFrameImage?.complete && selectedFrameImage.naturalWidth) return Promise.resolve(selectedFrameImage);
+    const src = frame?.image ? toAbsoluteAssetUrl(frame.image) : '';
+    if (!src) return Promise.resolve(null);
+    return new Promise(resolve => {
+        const image = selectedFrameImageCache.get(src) || new Image();
+        const done = () => {
+            if (image.naturalWidth) {
+                selectedFrameImageCache.set(src, image);
+                selectedFrameImage = image;
+                resolve(image);
+            } else {
+                resolve(null);
+            }
+        };
+        if (image.complete) return done();
+        image.onload = done;
+        image.onerror = () => resolve(null);
+        image.src = src;
+    });
+}
+
 function getCameraGlassesPayload(frame = getSelectedFrame()) {
     if (!frame) return cameraGlassesStyle;
     return {
@@ -502,7 +809,14 @@ function renderFrameSelect() {
     if (!select) return;
 
     const selected = ensureSelectedFrame();
-    select.innerHTML = getFrameCatalog().map(frame => (
+    const frames = getFrameCatalog();
+    if (!frames.length) {
+        select.innerHTML = '<option value="">暂无镜框</option>';
+        renderTryOnStrip();
+        updateWishlistControls();
+        return;
+    }
+    select.innerHTML = frames.map(frame => (
         `<option value="${escapeHtml(frame.id)}">${escapeHtml(frame.name)}</option>`
     )).join('');
     if (selected) select.value = selected.id;
@@ -558,10 +872,10 @@ function showUserDashboard() {
     if (dashboard) dashboard.style.display = 'block';
     const heroLoginAction = document.getElementById('hero-login-action');
     if (heroLoginAction) {
-        heroLoginAction.textContent = '已登录，开始保存';
+        heroLoginAction.textContent = isTemporaryUser ? '临时用户已启用' : '通行证已连接';
         heroLoginAction.onclick = () => {
             document.getElementById('user-dashboard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            showToast('已登录，完成识别后可保存或发送给商家');
+            showToast(isTemporaryUser ? '当前使用临时配镜用户，正式保存可再登录通行证' : '已登录，完成识别后可保存或发送给商家');
         };
     }
 
@@ -571,11 +885,13 @@ function showUserDashboard() {
     if (userSection) {
         userSection.innerHTML = `
             <span>${escapeHtml(nickname)}${isTemporaryUser ? ' · 临时' : ''}</span>
-            <div class="user-avatar">${avatar.length <= 2 ? avatar : '👤'}</div>
+            <div class="user-avatar">${escapeHtml(avatar.length <= 2 ? avatar : '👤')}</div>
             <button class="btn btn-secondary" onclick="${isTemporaryUser ? 'clearTemporaryFittingUser()' : 'logout()'}">${isTemporaryUser ? '清除' : '退出'}</button>
         `;
     }
 
+    carryUserToLinks();
+    updateExportButtons();
     requestAnimationFrame(() => drawModelPreview(latestAnalysis));
 }
 
@@ -591,10 +907,12 @@ function showAnonymousUser() {
 
 function buildPassportUrl(page) {
     const redirect = new URL(window.location.href);
-    redirect.searchParams.delete('passport_uid');
+    AUTH_RETURN_PARAMS.forEach(param => redirect.searchParams.delete(param));
     const url = new URL(`https://zhengzhengstudio.cn/passport/${page}.html`);
     url.searchParams.set('redirect', redirect.href);
     url.searchParams.set('from', 'glasses');
+    url.searchParams.set('scope', 'glasses');
+    url.searchParams.set('returnUser', '1');
     return url.href;
 }
 
@@ -847,6 +1165,8 @@ function applyModelResult(model = {}, recs = null) {
     renderRecommendations(recs && recs.length ? recs : buildLocalRecommendations(analysis));
     showFaceResultPanel();
     drawFaceOverlay();
+    fillCustomizationFromAnalysis(false);
+    renderFrame3DPreview();
     updateRecognition(getAnalysisSourceLabel(analysis.source), analysis.confidence || analysis.fitScore, 100);
     saveGlassesHomeState();
     getTryOnSnapshotDataUrl().then(dataUrl => {
@@ -879,6 +1199,7 @@ function buildAnalysis(model = {}) {
     const fitScore = clampNumber(Math.round(94 - frameDelta * 4 - pdBalance * 0.7 - comfortPenalty), 72, 98);
     const riskLevel = fitScore >= 90 ? '低风险' : fitScore >= 82 ? '需确认' : '建议定制';
     const confidence = model.confidence ? clampNumber(model.confidence, 0, 100) : null;
+    const scaleInfo = getMeasurementScaleInfo(model, manual);
 
     return {
         ...preferences,
@@ -902,6 +1223,10 @@ function buildAnalysis(model = {}) {
         riskLevel,
         source: model.source || 'local',
         confidence,
+        measurementScaleSource: scaleInfo.source,
+        measurementScaleLabel: scaleInfo.label,
+        measurementScaleConfidence: scaleInfo.confidence,
+        measurementScaleNote: scaleInfo.note,
         customizationScale: model.customizationScale || 1,
         customizationNote: model.customizationNote || '',
         calibrationNote: model.calibrationNote || '',
@@ -925,6 +1250,39 @@ function getManualInputs() {
         faceHeight: getNumberValue('face-height-input'),
         bridgeWidth: getNumberValue('quick-bridge-width-input') || getNumberValue('bridge-width-input'),
         templeLength: getNumberValue('temple-length-input')
+    };
+}
+
+function getMeasurementScaleInfo(model = {}, manual = getManualInputs()) {
+    if (manual.pd || model.scaleSource === 'pd') {
+        return {
+            source: 'pd',
+            label: '验光单/手动瞳距',
+            confidence: 92,
+            note: '毫米比例尺由真实瞳距锁定，镜圈宽度、鼻梁宽和移心量会更可靠。'
+        };
+    }
+    if (manual.faceWidth || model.scaleSource === 'face_width') {
+        return {
+            source: 'face_width',
+            label: '手动脸宽标定',
+            confidence: 82,
+            note: '毫米比例尺由脸宽估算，适合初筛；正式定制前仍建议补充验光单瞳距。'
+        };
+    }
+    if (model.source === 'mediapipe_free') {
+        return {
+            source: 'mediapipe_ratio',
+            label: 'MediaPipe 比例估算',
+            confidence: 68,
+            note: '摄像头关键点只能稳定比例，缺少真实标定物时不能保证绝对毫米尺寸。'
+        };
+    }
+    return {
+        source: 'estimate',
+        label: '系统估算',
+        confidence: 58,
+        note: '当前尺寸是体验用估算值；要做定制，请输入真实瞳距或脸宽后重新校准。'
     };
 }
 
@@ -1032,6 +1390,12 @@ function clampNumber(value, min, max) {
     return Math.max(min, Math.min(max, n));
 }
 
+function clampFloat(value, min, max) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return min;
+    return Math.max(min, Math.min(max, n));
+}
+
 function inferFaceShape(faceWidth, faceHeight) {
     const ratio = faceHeight / faceWidth;
     if (ratio > 1.45) return '长方形';
@@ -1094,6 +1458,7 @@ function renderAnalysisReport(analysis) {
             <div><span>镜腿策略</span><strong>${analysis.templeLabel}</strong></div>
             <div><span>识别来源</span><strong>${sourceText}</strong></div>
             <div><span>视觉置信度</span><strong>${analysis.confidence ? `${analysis.confidence}%` : '待校准'}</strong></div>
+            <div><span>毫米标定</span><strong>${escapeHtml(analysis.measurementScaleLabel || '待校准')} · ${analysis.measurementScaleConfidence || 0}%</strong></div>
             <div><span>定制校准</span><strong>${analysis.customizationScale && analysis.customizationScale !== 1 ? `多角度系数 ${analysis.customizationScale}` : '等待多角度采集'}</strong></div>
         </div>
         <div class="report-notes">
@@ -1101,6 +1466,7 @@ function renderAnalysisReport(analysis) {
             <p>${usageText}</p>
             <p>${comfortText}</p>
             ${analysis.customizationNote ? `<p>${escapeHtml(analysis.customizationNote)}</p>` : ''}
+            <p>${escapeHtml(analysis.measurementScaleNote || '')}</p>
             <p>${escapeHtml(calibrationText)}</p>
             <p>照片检测：${issueText}</p>
         </div>
@@ -1212,12 +1578,16 @@ function getAnalysisSourceLabel(source) {
 }
 
 function escapeHtml(value) {
-    return String(value)
+    return String(value ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+}
+
+function jsArg(value) {
+    return JSON.stringify(String(value ?? '')).replace(/</g, '\\u003c');
 }
 
 function updateRecognition(status, confidence, progress) {
@@ -1233,9 +1603,24 @@ function updateRecognition(status, confidence, progress) {
 
 async function loadMediapipeApi() {
     if (!mediapipeApiPromise) {
-        mediapipeApiPromise = import('./mediapipe-camera.mjs?v=20260519-serverchat1');
+        mediapipeApiPromise = import('./mediapipe-camera.mjs?v=20260621-actionfix1');
     }
     return mediapipeApiPromise;
+}
+
+function preloadMediapipeWhenIdle() {
+    const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    const isConstrained = Boolean(connection?.saveData)
+        || /(^|-)2g$/.test(String(connection?.effectiveType || ''))
+        || window.matchMedia?.('(max-width: 760px)').matches;
+    if (isConstrained || document.hidden) return;
+
+    const warm = () => preloadMediapipe();
+    if ('requestIdleCallback' in window) {
+        window.requestIdleCallback(warm, { timeout: 6000 });
+    } else {
+        setTimeout(warm, 4000);
+    }
 }
 
 async function preloadMediapipe() {
@@ -1458,17 +1843,24 @@ async function startMediapipeCamera() {
     const video = document.getElementById('mediapipe-video');
     const canvas = document.getElementById('mediapipe-overlay');
     if (!video || !canvas) return;
+    if (isCameraStarting) {
+        showToast('摄像机正在启动，请稍等');
+        return;
+    }
 
     try {
+        isCameraStarting = true;
+        applyCameraFacingState();
+        renderFrameSelect();
+        refreshCameraGlassesPayload();
         if (mediapipeCameraController) {
             mediapipeCameraController.stop();
             mediapipeCameraController = null;
         }
 
-        updateCameraStatus('加载模型');
-        updateRecognition('摄像机启动中', 20, 18);
+        updateCameraStatus('打开摄像头');
+        updateRecognition('正在打开摄像头', 20, 18);
         const api = await loadMediapipeApi();
-        const landmarker = preloadedVideoLandmarker || await api.getFaceLandmarker('VIDEO');
         mediapipeCameraController = await api.createMediapipeCamera({
             video,
             canvas,
@@ -1476,13 +1868,30 @@ async function startMediapipeCamera() {
             drawMesh: cameraMeshEnabled,
             drawGlasses: cameraGlassesEnabled,
             glassesStyle: cameraGlassesStyle,
-            landmarker,
+            landmarker: preloadedVideoLandmarker,
             onStatus(status) {
                 updateCameraStatus({
-                    loading: '加载模型',
+                    opening: '打开摄像头',
+                    preview: '画面已打开',
+                    loading: '准备识别',
                     running: '实时识别中',
+                    model_error: '识别模型失败',
                     stopped: '已停止'
                 }[status] || status);
+                if (status === 'preview') {
+                    updateRecognition('摄像头已打开，正在准备识别', 12, 26);
+                    updateCameraActionGuide('准备识别', '画面已经打开', '先把脸放到画面中央，模型加载完成后会自动开始识别。');
+                }
+                if (status === 'loading') {
+                    updateRecognition('正在加载人脸识别模型', 18, 36);
+                }
+                if (status === 'running') {
+                    updateCameraActionGuide('可以开始', '保持脸在画面中央', '现在可以单张生成、实时试戴，或进入多角度采集。');
+                }
+                if (status === 'model_error') {
+                    updateCameraActionGuide('识别失败', '模型加载失败', '摄像头画面仍可用。请检查网络，或刷新页面后重试。');
+                }
+                syncCameraControlState();
             },
             onResult(result) {
                 latestCameraResult = result;
@@ -1503,25 +1912,60 @@ async function startMediapipeCamera() {
                 }
             }
         });
-        showToast('MediaPipe 摄像机已启动');
-        updateCameraActionGuide('准备开始', '保持脸在画面中央', '点击“多角度采集”，按提示完成正脸、左右、上下、张嘴和眨眼。');
+        syncCameraControlState();
+        showToast('摄像头画面已打开，识别模型会自动准备');
     } catch (error) {
         console.error('Mediapipe camera failed:', error);
+        mediapipeCameraController = null;
         updateCameraStatus('摄像机不可用');
         updateRecognition('摄像机不可用', 0, 0);
         showToast('无法打开摄像头，请检查权限或浏览器支持');
+    } finally {
+        isCameraStarting = false;
+        syncCameraControlState();
     }
 }
 
-function stopMediapipeCamera() {
-    captureLatestCameraSnapshot();
+async function switchMediapipeCamera() {
+    cameraFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user';
+    localStorage.setItem('zz_glasses_camera_facing', cameraFacingMode);
+    applyCameraFacingState();
+
+    try {
+        if (!mediapipeCameraController) {
+            await startMediapipeCamera();
+            return;
+        }
+        updateCameraStatus('切换摄像头');
+        await mediapipeCameraController.switchCamera?.(cameraFacingMode);
+        updateCameraStatus('实时识别中');
+        syncCameraControlState();
+        showToast(`已切换到${cameraFacingMode === 'user' ? '前置' : '后置'}摄像头`);
+    } catch (error) {
+        console.error('Switch camera failed:', error);
+        updateCameraStatus('切换失败');
+        showToast('切换摄像头失败，请检查设备权限');
+    }
+}
+
+function stopMediapipeCamera(options = {}) {
+    const shouldCapture = options?.capture !== false;
+    if (shouldCapture) captureLatestCameraSnapshot();
     if (mediapipeCameraController) {
         mediapipeCameraController.stop();
         mediapipeCameraController = null;
     }
     latestCameraResult = null;
     latestCameraSamples = [];
+    isCameraStarting = false;
     updateCameraStatus('已停止');
+    if (faceActionCapture.active) {
+        faceActionCapture.active = false;
+        renderActionCapture();
+        updateActionPrompt('已停止多角度采集');
+        updateCameraActionGuide('已停止', '摄像机已关闭', '可以重新启动摄像机后继续采集。');
+    }
+    syncCameraControlState();
 }
 
 function trackCameraSample(result, image) {
@@ -1573,7 +2017,21 @@ function averageLandmarkFrames(frames = []) {
     });
 }
 
+function isMediapipeModelReady() {
+    return Boolean(mediapipeCameraController?.getModelState?.().ready);
+}
+
+function warnMediapipeModelNotReady() {
+    updateRecognition('人脸识别模型还在准备', 18, 42);
+    updateCameraActionGuide('请稍等', '正在准备人脸识别', '摄像头画面已打开，模型加载完成后会自动开始识别。');
+    showToast('识别模型还在准备，请稍等几秒');
+}
+
 function captureMediapipeModel() {
+    if (mediapipeCameraController && !isMediapipeModelReady()) {
+        warnMediapipeModelNotReady();
+        return;
+    }
     if (!latestCameraResult?.landmarks) {
         showToast('还没有识别到清晰人脸');
         return;
@@ -1617,8 +2075,12 @@ async function startActionCapture() {
         await startMediapipeCamera();
         if (!mediapipeCameraController) return;
     }
-    cameraGlassesEnabled = false;
-    if (mediapipeCameraController) mediapipeCameraController.setDrawGlasses(false);
+    if (!isMediapipeModelReady()) {
+        warnMediapipeModelNotReady();
+        return;
+    }
+    setCameraMeshVisible(true);
+    setCameraGlassesVisible(false);
 
     faceActionCapture = {
         active: true,
@@ -1627,6 +2089,9 @@ async function startActionCapture() {
         holdCount: 0,
         lastMatchedStep: null,
         matchedSince: 0,
+        baselineAction: null,
+        stepStartedAt: performance.now(),
+        bestFrame: null,
         candidateFrames: []
     };
     renderActionCapture();
@@ -1643,11 +2108,38 @@ function resetActionCapture() {
         holdCount: 0,
         lastMatchedStep: null,
         matchedSince: 0,
+        baselineAction: null,
+        stepStartedAt: 0,
+        bestFrame: null,
         candidateFrames: []
     };
     renderActionCapture();
     updateActionPrompt('等待开始多角度采集');
-    updateCameraActionGuide('准备开始', '保持脸在画面中央', '点击“多角度采集”，按提示完成正脸、左右、上下、张嘴和眨眼。');
+    updateCameraActionGuide('准备开始', '保持脸大致在画面中央', '点击“多角度采集”，按提示轻轻动一下即可；网格默认打开，方便看到是否识别到了。');
+    setCameraMeshVisible(true);
+    if (!document.body.classList.contains('onboard-page') || onboardStepIndex !== 2) {
+        setCameraGlassesVisible(true);
+    }
+}
+
+function skipCurrentActionCaptureStep() {
+    if (!faceActionCapture.active) {
+        showToast('请先开始多角度采集');
+        return;
+    }
+    const step = faceActionSteps[faceActionCapture.currentIndex];
+    if (!step) return;
+    const fallback = faceActionCapture.bestFrame || (latestCameraResult?.landmarks ? {
+        landmarks: cloneLandmarks(latestCameraResult.landmarks),
+        action: { ...(latestCameraResult.action || {}) },
+        quality: 0.2
+    } : null);
+    if (!fallback?.landmarks) {
+        showToast('还没有识别到人脸，先把脸放到画面中央');
+        return;
+    }
+    acceptActionStepFromFrame(step, fallback, true);
+    showToast(`已跳过/宽松采集：${step.label}`);
 }
 
 function handleActionCaptureFrame(result) {
@@ -1658,8 +2150,18 @@ function handleActionCaptureFrame(result) {
 
     const holdFrames = typeof ACTION_HOLD_FRAMES === 'object' ? (ACTION_HOLD_FRAMES[step.id] || 6) : ACTION_HOLD_FRAMES;
     const minStepMs = typeof ACTION_MIN_STEP_MS === 'object' ? (ACTION_MIN_STEP_MS[step.id] || 500) : ACTION_MIN_STEP_MS;
+    const frameQuality = getActionFrameQuality(result.landmarks);
+    rememberActionBestFrame(result, frameQuality);
+    if (frameQuality < 0.1) {
+        faceActionCapture.holdCount = 0;
+        faceActionCapture.lastMatchedStep = null;
+        faceActionCapture.matchedSince = 0;
+        faceActionCapture.candidateFrames = [];
+        updateActionPrompt(`${step.label}：脸放进取景框中间即可，不用贴太近`, 0, holdFrames);
+        return;
+    }
 
-    if (result.action.matched?.[step.id]) {
+    if (isActionStepMatched(step.id, result.action)) {
         const now = performance.now();
         if (faceActionCapture.lastMatchedStep === step.id) {
             faceActionCapture.holdCount += 1;
@@ -1677,19 +2179,28 @@ function handleActionCaptureFrame(result) {
 
         const exists = faceActionCapture.frames.some(frame => frame.id === step.id);
         if (!exists) {
+            const video = document.getElementById('mediapipe-video');
+            const image = step.id !== 'blink' ? captureCameraFrameDataUrl(video) : '';
             faceActionCapture.frames.push({
                 id: step.id,
                 label: step.label,
                 landmarks: averageLandmarkFrames(faceActionCapture.candidateFrames) || result.landmarks,
                 action: result.action,
+                image,
                 capturedAt: Date.now()
             });
+            if (step.id === 'front') {
+                faceActionCapture.baselineAction = { ...result.action };
+                latestCleanCameraFrameDataUrl = image || latestCleanCameraFrameDataUrl;
+            }
         }
         faceActionCapture.currentIndex += 1;
         faceActionCapture.holdCount = 0;
         faceActionCapture.lastMatchedStep = null;
         faceActionCapture.matchedSince = 0;
         faceActionCapture.candidateFrames = [];
+        faceActionCapture.stepStartedAt = performance.now();
+        faceActionCapture.bestFrame = null;
         renderActionCapture();
 
         if (faceActionCapture.currentIndex >= faceActionSteps.length) {
@@ -1703,8 +2214,135 @@ function handleActionCaptureFrame(result) {
         faceActionCapture.lastMatchedStep = null;
         faceActionCapture.matchedSince = 0;
         faceActionCapture.candidateFrames = [];
-        updateActionPrompt();
+        maybeAutoAcceptLooseActionStep(step, result, frameQuality, holdFrames);
     }
+}
+
+function isActionStepMatched(stepId, action = {}) {
+    const baseline = faceActionCapture.baselineAction || action;
+    const yawDelta = Number(action.yaw || 0) - Number(baseline.yaw || 0);
+    const pitchDelta = Number(action.pitch || 0) - Number(baseline.pitch || 0);
+    const mouthBase = Number(baseline.mouthOpen || 0);
+    const eyeBase = Number(baseline.eyeOpen || 0.024);
+
+    if (stepId === 'front') {
+        return Math.abs(action.yaw || 0) < 0.2
+            && (action.mouthOpen || 0) < 0.08
+            && (action.eyeOpen || 0) > 0.004;
+    }
+    if (stepId === 'left') return Math.abs(yawDelta) > 0.012 || action.matched?.left || action.matched?.right;
+    if (stepId === 'right') {
+        const leftAction = faceActionCapture.frames.find(frame => frame.id === 'left')?.action;
+        const leftDelta = leftAction ? Number(leftAction.yaw || 0) - Number(baseline.yaw || 0) : 0;
+        if (leftAction && Math.sign(yawDelta || 0) !== Math.sign(leftDelta || 0) && Math.abs(yawDelta) > 0.009) return true;
+        if (leftAction && Math.abs(Number(action.yaw || 0) - Number(leftAction.yaw || 0)) > 0.024) return true;
+        return Math.abs(yawDelta) > 0.016 || action.matched?.left || action.matched?.right;
+    }
+    if (stepId === 'up') return Math.abs(pitchDelta) > 0.01 || action.matched?.up || action.matched?.down;
+    if (stepId === 'down') {
+        const upAction = faceActionCapture.frames.find(frame => frame.id === 'up')?.action;
+        const upDelta = upAction ? Number(upAction.pitch || 0) - Number(baseline.pitch || 0) : 0;
+        if (upAction && Math.sign(pitchDelta || 0) !== Math.sign(upDelta || 0) && Math.abs(pitchDelta) > 0.008) return true;
+        if (upAction && Math.abs(Number(action.pitch || 0) - Number(upAction.pitch || 0)) > 0.018) return true;
+        return Math.abs(pitchDelta) > 0.014 || action.matched?.up || action.matched?.down;
+    }
+    if (stepId === 'mouth') return (action.mouthOpen || 0) > Math.max(0.02, mouthBase + 0.006);
+    if (stepId === 'blink') return (action.eyeOpen || 0) < Math.max(0.018, eyeBase * 0.9);
+    return Boolean(action.matched?.[stepId]);
+}
+
+function rememberActionBestFrame(result, frameQuality = 0) {
+    if (!faceActionCapture.active || !result?.landmarks) return;
+    const currentScore = Number(faceActionCapture.bestFrame?.quality || 0);
+    const action = result.action || {};
+    const motionScore = Math.max(Math.abs(action.yaw || 0), Math.abs((action.pitch || 0) - (faceActionCapture.baselineAction?.pitch || action.pitch || 0)));
+    const score = frameQuality + motionScore;
+    if (score <= currentScore) return;
+    faceActionCapture.bestFrame = {
+        landmarks: cloneLandmarks(result.landmarks),
+        action: { ...action },
+        quality: score,
+        capturedAt: performance.now()
+    };
+}
+
+function maybeAutoAcceptLooseActionStep(step, result, frameQuality, holdFrames) {
+    const elapsed = performance.now() - (faceActionCapture.stepStartedAt || performance.now());
+    const action = result.action || {};
+    let detail = getActionMissHint(step.id, action);
+
+    if (elapsed > 6500 && frameQuality > 0.18 && faceActionCapture.bestFrame?.landmarks && step.id !== 'front') {
+        acceptActionStepFromFrame(step, faceActionCapture.bestFrame, true);
+        return;
+    }
+
+    updateActionPrompt(`${step.label}：${detail}`, 0, holdFrames);
+}
+
+function getActionMissHint(stepId, action = {}) {
+    const baseline = faceActionCapture.baselineAction || action;
+    const yawDelta = Number(action.yaw || 0) - Number(baseline.yaw || 0);
+    const pitchDelta = Number(action.pitch || 0) - Number(baseline.pitch || 0);
+    if (stepId === 'front') return '正对屏幕、眼睛睁开，停一下就会采集';
+    if (stepId === 'left') return `向任意一侧轻轻转头，目前左右变化 ${Math.abs(yawDelta).toFixed(2)}`;
+    if (stepId === 'right') return `转到另一侧，目前左右变化 ${Math.abs(yawDelta).toFixed(2)}`;
+    if (stepId === 'up') return `抬头或低头都可，先采一个方向，目前上下变化 ${Math.abs(pitchDelta).toFixed(2)}`;
+    if (stepId === 'down') return `换另一个上下方向，目前上下变化 ${Math.abs(pitchDelta).toFixed(2)}`;
+    if (stepId === 'mouth') return `自然张嘴一下，目前张嘴值 ${(action.mouthOpen || 0).toFixed(2)}`;
+    if (stepId === 'blink') return `眨一下眼，或者点“跳过当前动作”继续`;
+    return '保持动作一下';
+}
+
+function acceptActionStepFromFrame(step, frame, loose = false) {
+    if (!step || !frame?.landmarks) return;
+    if (faceActionCapture.frames.some(item => item.id === step.id)) return;
+    const video = document.getElementById('mediapipe-video');
+    const image = step.id !== 'blink' ? captureCameraFrameDataUrl(video) : '';
+    faceActionCapture.frames.push({
+        id: step.id,
+        label: step.label,
+        landmarks: frame.landmarks,
+        action: frame.action || {},
+        image,
+        loose,
+        capturedAt: Date.now()
+    });
+    if (step.id === 'front') {
+        faceActionCapture.baselineAction = { ...(frame.action || {}) };
+        latestCleanCameraFrameDataUrl = image || latestCleanCameraFrameDataUrl;
+    }
+    faceActionCapture.currentIndex += 1;
+    faceActionCapture.holdCount = 0;
+    faceActionCapture.lastMatchedStep = null;
+    faceActionCapture.matchedSince = 0;
+    faceActionCapture.candidateFrames = [];
+    faceActionCapture.stepStartedAt = performance.now();
+    faceActionCapture.bestFrame = null;
+    renderActionCapture();
+    if (faceActionCapture.currentIndex >= faceActionSteps.length) {
+        finishActionCapture();
+    } else {
+        updateActionPrompt(loose ? '已按宽松模式采集，继续下一步' : null);
+        updateRecognition('多角度采集中', 62, Math.round(faceActionCapture.currentIndex / faceActionSteps.length * 100));
+    }
+}
+
+function getActionFrameQuality(points = []) {
+    if (!Array.isArray(points) || points.length < 40) return 0;
+    const xs = points.map(point => point.x).filter(Number.isFinite);
+    const ys = points.map(point => point.y).filter(Number.isFinite);
+    if (!xs.length || !ys.length) return 0;
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const faceW = maxX - minX;
+    const faceH = maxY - minY;
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    const sizeScore = clampFloat((Math.min(faceW, faceH) - 0.18) / 0.24, 0, 1);
+    const centerPenalty = Math.min(Math.abs(centerX - 0.5) * 1.1 + Math.abs(centerY - 0.48) * 0.8, 0.55);
+    return clampFloat(sizeScore - centerPenalty + 0.28, 0, 1);
 }
 
 function finishActionCapture() {
@@ -1718,8 +2356,8 @@ function finishActionCapture() {
 
     const video = document.getElementById('mediapipe-video');
     const model = convertLandmarksToAnalysis(frontFrame.landmarks, video);
-    setPreviewFromCameraFrame(video);
-    const currentFrameLandmarks = latestCameraResult?.landmarks || frontFrame.landmarks;
+    setPreviewFromDataUrl(frontFrame.image || latestCleanCameraFrameDataUrl || latestCameraFrameDataUrl, cameraFacingMode === 'user');
+    const currentFrameLandmarks = frontFrame.landmarks;
     const left = faceActionCapture.frames.find(frame => frame.id === 'left')?.action;
     const right = faceActionCapture.frames.find(frame => frame.id === 'right')?.action;
     const up = faceActionCapture.frames.find(frame => frame.id === 'up')?.action;
@@ -1744,18 +2382,16 @@ function finishActionCapture() {
         confidence,
         customizationScale,
         customizationNote,
+        scaleSource: getManualInputs().pd ? 'pd' : getManualInputs().faceWidth ? 'face_width' : 'mediapipe_ratio',
         qualityIssues: [...(model.qualityIssues || []), ...actionQualityIssues],
-        calibrationNote: `${model.calibrationNote} 已完成 ${faceActionCapture.frames.length} 个动作关键帧采集，并对每个动作取连续稳定帧平均：左右转头跨度 ${yawSpan.toFixed(2)}，上下动作跨度 ${pitchSpan.toFixed(2)}，并检查张嘴与眨眼动作。`
+        calibrationNote: `${model.calibrationNote} 已完成 ${faceActionCapture.frames.length} 个动作关键帧采集；报告主图使用正脸睁眼帧，眨眼只作为活体动作校验：左右转头跨度 ${yawSpan.toFixed(2)}，上下动作跨度 ${pitchSpan.toFixed(2)}。`
     }, buildLocalRecommendations(buildAnalysis(model)));
 
     updateActionPrompt('多角度采集完成');
     updateCameraActionGuide('完成', '已生成多角度配镜参数', '你可以换镜框继续试戴，也可以重新采集一次。', 'done');
     updateRecognition('多角度结果完成', confidence, 100);
     showToast('多角度采集完成，已生成更稳的配镜参数');
-    if (document.body.classList.contains('onboard-page') && onboardStepIndex >= 3) {
-        cameraGlassesEnabled = true;
-        if (mediapipeCameraController) mediapipeCameraController.setDrawGlasses(true);
-    }
+    setCameraGlassesVisible(true);
 }
 
 function updateActionPrompt(text = null, holdCount = 0, maxFrames = 6) {
@@ -1803,35 +2439,15 @@ function updateCameraActionGuide(stepText, title, detail, state = '') {
 }
 
 function toggleMediapipeMesh(button) {
-    cameraMeshEnabled = !cameraMeshEnabled;
-    button?.classList.toggle('active', cameraMeshEnabled);
-    if (mediapipeCameraController) {
-        mediapipeCameraController.setDrawMesh(cameraMeshEnabled);
-    }
+    setCameraMeshVisible(!cameraMeshEnabled);
 }
 
 function toggleMediapipeGlasses(button) {
-    cameraGlassesEnabled = !cameraGlassesEnabled;
-    button?.classList.toggle('active', cameraGlassesEnabled);
-    if (mediapipeCameraController) {
-        mediapipeCameraController.setDrawGlasses(cameraGlassesEnabled);
-    }
+    setCameraGlassesVisible(!cameraGlassesEnabled);
 }
 
 async function toggleCameraFacing(button) {
-    const newMode = cameraFacingMode === 'user' ? 'environment' : 'user';
-    cameraFacingMode = newMode;
-    if (mediapipeCameraController) {
-        try {
-            await mediapipeCameraController.switchCamera(newMode);
-            showToast(`已切换到${newMode === 'user' ? '前置' : '后置'}摄像头`);
-        } catch (error) {
-            console.error('Switch camera failed:', error);
-            showToast('切换摄像头失败');
-        }
-    } else {
-        showToast(`下次启动将使用${newMode === 'user' ? '前置' : '后置'}摄像头`);
-    }
+    await switchMediapipeCamera();
 }
 
 function setMediapipeGlasses(style) {
@@ -1846,15 +2462,26 @@ function setMediapipeGlasses(style) {
     if (mediapipeCameraController) {
         mediapipeCameraController.setGlassesStyle(cameraGlassesStyle);
     }
+    syncCameraControlState();
+    if (previewGlassesScaleMode === 'auto') {
+        previewGlassesScale = estimateIdealGlassesScale(frame, latestAnalysis || buildAnalysis({}));
+        syncGlassesControlInputs();
+        refreshCameraGlassesPayload();
+    }
     updateSelectedFrameUI();
     drawFaceOverlay();
+    renderFrame3DPreview(frame);
+    saveGlassesHomeState();
 }
 
 function refreshCameraGlassesPayload() {
-    cameraGlassesStyle = getCameraGlassesPayload(getSelectedFrame());
+    const frame = ensureSelectedFrame();
+    cameraGlassesStyle = getCameraGlassesPayload(frame);
+    if (frame) preloadSelectedFrameImage(frame);
     if (mediapipeCameraController) {
         mediapipeCameraController.setGlassesStyle(cameraGlassesStyle);
     }
+    syncCameraControlState();
 }
 
 function updatePreviewGlassesControl(type, value) {
@@ -1862,6 +2489,7 @@ function updatePreviewGlassesControl(type, value) {
     if (!Number.isFinite(numeric)) return;
     if (type === 'scale') {
         previewGlassesScale = Math.max(0.55, Math.min(1.75, numeric / 100));
+        previewGlassesScaleMode = 'manual';
     }
     if (type === 'x') {
         previewGlassesOffsetX = Math.max(-90, Math.min(90, numeric));
@@ -1882,6 +2510,7 @@ function resetPreviewGlassesControls() {
     previewGlassesOffsetX = 0;
     previewGlassesOffsetY = 0;
     previewGlassesRotation = 0;
+    previewGlassesScaleMode = 'manual';
     syncGlassesControlInputs();
     refreshCameraGlassesPayload();
     drawFaceOverlay();
@@ -1925,15 +2554,236 @@ function autoScaleSelectedGlasses() {
         showToast('先选择镜框并完成一次识别');
         return;
     }
-    const targetLens = Number(analysis.recommendedLensWidth || analysis.lensWidth || 51);
-    const frameLens = Number(frame.lensWidth || targetLens);
-    const pdFactor = analysis.pd ? Math.max(0.92, Math.min(1.08, analysis.pd / 63)) : 1;
-    const baseScale = (targetLens / Math.max(frameLens, 1)) * pdFactor;
-    previewGlassesScale = Math.max(0.85, Math.min(1.25, baseScale));
+    const nextScale = estimateIdealGlassesScale(frame, analysis);
+    previewGlassesScale = nextScale;
+    previewGlassesScaleMode = 'auto';
     syncGlassesControlInputs();
     refreshCameraGlassesPayload();
     drawFaceOverlay();
-    showToast(`已按镜圈宽度自动缩放到 ${Math.round(previewGlassesScale * 100)}%`);
+    const frameTotal = getFrameTotalWidth(frame, analysis);
+    const pd = Number(analysis.pd || 63);
+    showToast(`已按瞳距 ${Math.round(pd)} mm、镜框总宽约 ${Math.round(frameTotal)} mm 调到 ${Math.round(previewGlassesScale * 100)}%`);
+}
+
+function estimateIdealGlassesScale(frame, analysis = {}) {
+    const pd = clampNumber(Number(analysis.pd || 63), 50, 75);
+    const frameTotal = getFrameTotalWidth(frame, analysis);
+    const imageVisualRatio = clampFloat(Number(frame?.imageVisualRatio || frame?.visualRatio || 0.72), 0.58, 0.9);
+    const rendererBaseRatio = 3.55;
+    let physicalScale = frameTotal / pd / imageVisualRatio / rendererBaseRatio;
+
+    const recommendedLens = Number(analysis.recommendedLensWidth || 0);
+    const frameLens = Number(frame?.lensWidth || recommendedLens || 51);
+    if (recommendedLens && frameLens) {
+        const sizeFitFactor = clampFloat(recommendedLens / frameLens, 0.88, 1.12);
+        physicalScale = physicalScale * (0.78 + sizeFitFactor * 0.22);
+    }
+
+    return clampFloat(physicalScale, 0.5, 1.9);
+}
+
+function getFrameTotalWidth(frame, analysis = {}) {
+    const lensWidth = Number(frame?.lensWidth || analysis.recommendedLensWidth || analysis.lensWidth || 51);
+    const bridgeWidth = Number(frame?.bridgeSize || frame?.bridgeWidth || analysis.recommendedBridgeWidth || analysis.bridgeWidth || 18);
+    return Math.max(96, lensWidth * 2 + bridgeWidth);
+}
+
+function getFrame3DModel(frame = getSelectedFrame()) {
+    if (!frame) return null;
+    const saved = frame3dModels.get(frame.id);
+    if (saved?.modelUrl || saved?.viewerUrl || saved?.apiModelId) return saved;
+    return null;
+}
+
+function renderFrame3DPreview(frame = getSelectedFrame()) {
+    const apiBox = document.getElementById('frame-3d-api-preview');
+    const meta = document.getElementById('frame-3d-meta');
+    if (!apiBox) return;
+    const selected = frame || getSelectedFrame();
+    const model = getFrame3DModel(frame);
+    if (!selected) {
+        apiBox.innerHTML = '<strong>先选择镜框</strong><span>选择镜框后再请求 3D 模型 API。</span>';
+        if (meta) meta.innerHTML = '';
+        return;
+    }
+    if (model?.modelUrl || model?.viewerUrl) {
+        apiBox.innerHTML = `
+            <strong>3D 模型已由 API 提供</strong>
+            <span>不再使用 SVG 或 canvas 假 3D。</span>
+            <div class="frame-3d-actions">
+                ${model.viewerUrl ? `<a class="btn btn-secondary" href="${escapeHtml(model.viewerUrl)}" target="_blank" rel="noopener">打开 3D 预览</a>` : ''}
+                ${model.modelUrl ? `<a class="btn btn-primary" href="${escapeHtml(model.modelUrl)}" target="_blank" rel="noopener">下载模型</a>` : ''}
+            </div>
+        `;
+        if (meta) {
+            meta.innerHTML = `
+                <span>模型来源：3D API</span>
+                <span>模型格式：${escapeHtml(model.format || 'GLB/USDZ')}</span>
+            `;
+        }
+        return;
+    }
+
+    const requestId = ++frame3dRequestSeq;
+    apiBox.innerHTML = '<strong>正在请求 3D 模型 API</strong><span>如果接口未配置，这里只显示状态，不生成假模型。</span>';
+    if (meta) {
+        meta.innerHTML = `
+            <span>模型来源：等待 API</span>
+            <span>当前镜框：${escapeHtml(selected.name || '-')}</span>
+        `;
+    }
+    fetch(`${API_BASE}/api/glasses/frame-3d/model`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            frame: selected,
+            customization: readSavedCustomizationData(),
+            analysis: latestAnalysis || null
+        })
+    })
+        .then(async response => {
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.success) throw new Error(data.error || `3D API ${response.status}`);
+            return data;
+        })
+        .then(data => {
+            if (requestId !== frame3dRequestSeq) return;
+            const apiModel = data.model || {};
+            if (!apiModel.modelUrl && !apiModel.viewerUrl) throw new Error(data.message || 'API 暂未返回模型文件');
+            frame3dModels.set(selected.id, apiModel);
+            renderFrame3DPreview(selected);
+        })
+        .catch(error => {
+            if (requestId !== frame3dRequestSeq) return;
+            apiBox.innerHTML = `
+                <strong>3D API 暂未连接</strong>
+                <span>已停止显示假 3D。接入 Hunyuan3D/Tripo/自建 GLB API 后，这里会显示真实模型预览或下载链接。</span>
+            `;
+            if (meta) {
+                meta.innerHTML = `
+                    <span>模型来源：未生成</span>
+                    <span>原因：${escapeHtml(error.message || '接口不可用')}</span>
+                `;
+            }
+        });
+}
+
+function fillCustomizationFromAnalysis(showToastMessage = false) {
+    const analysis = latestAnalysis || buildAnalysis({});
+    const frame = getSelectedFrame();
+    const model = getFrame3DModel(frame);
+    setInputValue('custom-lens-width', analysis.recommendedLensWidth || model?.lensWidth || 51);
+    setInputValue('custom-bridge-width', analysis.recommendedBridgeWidth || model?.bridgeWidth || 18);
+    setInputValue('custom-frame-total-width', Math.round(((analysis.recommendedLensWidth || model?.lensWidth || 51) * 2) + (analysis.recommendedBridgeWidth || model?.bridgeWidth || 18)));
+    setInputValue('custom-temple-length', analysis.templeLength || model?.templeLength || 145);
+    setInputValue('custom-lens-height', analysis.lensHeight || model?.lensHeight || 40);
+    const material = document.getElementById('custom-material');
+    if (material && frame?.material) material.value = frame.material;
+    renderCustomizationConfidence(analysis, frame);
+    renderFrame3DPreview(frame);
+    if (showToastMessage) showToast('已按本次测算填入定制参数');
+}
+
+function setInputValue(id, value) {
+    const input = document.getElementById(id);
+    if (input && (input.value === '' || document.body.dataset.onboardStep === '5')) input.value = value;
+}
+
+function collectCustomizationData() {
+    const analysis = latestAnalysis || buildAnalysis({});
+    const frame = getSelectedFrame();
+    const data = {
+        updatedAt: new Date().toISOString(),
+        uid: getCurrentUserId(),
+        customerName: getDisplayUserName(),
+        frameId: frame?.id || null,
+        frameName: frame?.name || '未选择镜框',
+        merchantId: frame?.merchantId || CHATGPT_MERCHANT.id,
+        merchantName: frame?.merchantName || CHATGPT_MERCHANT.name,
+        lensWidth: getNumberValue('custom-lens-width') || analysis.recommendedLensWidth,
+        bridgeWidth: getNumberValue('custom-bridge-width') || analysis.recommendedBridgeWidth,
+        frameTotalWidth: getNumberValue('custom-frame-total-width') || getFrameTotalWidth(frame, analysis),
+        lensHeight: getNumberValue('custom-lens-height') || analysis.lensHeight,
+        templeLength: getNumberValue('custom-temple-length') || analysis.templeLength,
+        nosePad: document.getElementById('custom-nose-pad')?.value || 'standard',
+        material: document.getElementById('custom-material')?.value || frame?.material || 'mixed',
+        hinge: document.getElementById('custom-hinge')?.value || 'standard',
+        prescription: getSavedPrescriptionData(),
+        analysis: {
+            faceShape: analysis.faceShape,
+            faceWidth: analysis.faceWidth,
+            pd: analysis.pd,
+            recommendedLensWidth: analysis.recommendedLensWidth,
+            recommendedBridgeWidth: analysis.recommendedBridgeWidth,
+            decentration: analysis.decentration,
+            measurementScaleSource: analysis.measurementScaleSource,
+            measurementScaleLabel: analysis.measurementScaleLabel,
+            measurementScaleConfidence: analysis.measurementScaleConfidence,
+            customizationScale: analysis.customizationScale,
+            qualityIssues: analysis.qualityIssues || []
+        },
+        model3d: getFrame3DModel(frame)
+    };
+    data.sizeConfidence = getCustomizationSizeConfidence(data, analysis);
+    return data;
+}
+
+function getCustomizationSizeConfidence(data, analysis = latestAnalysis || {}) {
+    let score = Number(analysis.measurementScaleConfidence || 58);
+    if (data.prescription?.pd || data.analysis?.pd) score += 4;
+    if (data.lensWidth && data.bridgeWidth && data.frameTotalWidth) score += 3;
+    if (analysis.customizationScale && analysis.customizationScale !== 1) score += 3;
+    return clampNumber(Math.round(score), 0, 98);
+}
+
+function saveCustomizationData(showToastMessage = true) {
+    const data = collectCustomizationData();
+    const key = `zz_glasses_customization_${getCurrentUserId()}`;
+    localStorage.setItem(key, JSON.stringify(data));
+    localStorage.setItem('zz_glasses_customization_last', JSON.stringify(data));
+    queueServerSync('customization', data);
+    saveGlassesHomeState();
+    renderCustomizationConfidence(latestAnalysis || buildAnalysis({}), getSelectedFrame());
+    if (showToastMessage) showToast('定制参数已保存，并已加入服务器同步队列');
+    return data;
+}
+
+function readSavedCustomizationData() {
+    try {
+        return JSON.parse(localStorage.getItem(`zz_glasses_customization_${getCurrentUserId()}`) || localStorage.getItem('zz_glasses_customization_last') || 'null');
+    } catch (error) {
+        return null;
+    }
+}
+
+function renderCustomizationConfidence(analysis = latestAnalysis || buildAnalysis({}), frame = getSelectedFrame()) {
+    const target = document.getElementById('customization-confidence');
+    if (!target) return;
+    const data = collectCustomizationData();
+    const exactFields = [
+        data.prescription?.pd || analysis.pd ? '瞳距' : null,
+        data.lensWidth ? '镜圈宽度' : null,
+        data.bridgeWidth ? '鼻梁宽' : null,
+        data.templeLength ? '镜腿长' : null
+    ].filter(Boolean);
+    target.innerHTML = `
+        <div><span>毫米来源</span><strong>${escapeHtml(analysis.measurementScaleLabel || '待校准')}</strong></div>
+        <div><span>尺寸可信度</span><strong>${data.sizeConfidence}%</strong></div>
+        <div><span>已确认字段</span><strong>${exactFields.join('、') || '暂无'}</strong></div>
+        <p>${escapeHtml(analysis.measurementScaleNote || '摄像头负责比例，真实毫米需要标定值。')}</p>
+    `;
+}
+
+function sendCustomizationToChat() {
+    const data = saveCustomizationData(false);
+    const userQuery = currentUser?.uid ? `?user=${encodeURIComponent(JSON.stringify(currentUser))}` : '';
+    localStorage.setItem(`zz_glasses_chat_draft_${getCurrentUserId()}`, JSON.stringify({
+        type: 'customization',
+        text: `我想定制「${data.frameName}」。镜圈 ${data.lensWidth} mm，鼻梁 ${data.bridgeWidth} mm，镜腿 ${data.templeLength} mm，镜圈高度 ${data.lensHeight} mm。验光单和采集数据已打包，请帮我确认能不能做。`,
+        payload: data,
+        createdAt: new Date().toISOString()
+    }));
+    window.location.href = `./chat.html${userQuery}`;
 }
 
 function getTryOnCorrectionMetrics() {
@@ -1972,75 +2822,149 @@ function getRawEyeCenter(points, side) {
     }), { x: 0, y: 0 });
 }
 
+function getCurrentTryOnAdjustment() {
+    return {
+        scale: Number(previewGlassesScale.toFixed(3)),
+        offsetX: Math.round(previewGlassesOffsetX),
+        offsetY: Math.round(previewGlassesOffsetY),
+        rotation: Math.round(previewGlassesRotation)
+    };
+}
+
+function buildClientTryOnAdjustment(metrics = getTryOnCorrectionMetrics(), frame = getSelectedFrame(), analysis = latestAnalysis || buildAnalysis({})) {
+    const base = getCurrentTryOnAdjustment();
+    const idealScale = frame ? estimateIdealGlassesScale(frame, analysis) : base.scale;
+    return {
+        scale: idealScale,
+        offsetX: base.offsetX,
+        offsetY: base.offsetY,
+        rotation: Math.abs(Number(metrics.eyeAngle || 0)) > 8 ? base.rotation * 0.45 : base.rotation * 0.25
+    };
+}
+
+function sanitizeTryOnAdjustment(raw = {}, base = getCurrentTryOnAdjustment()) {
+    const frame = getSelectedFrame();
+    const analysis = latestAnalysis || buildAnalysis({});
+    const idealScale = frame ? estimateIdealGlassesScale(frame, analysis) : base.scale;
+    const targetScale = Number.isFinite(Number(raw.scale)) ? Number(raw.scale) : idealScale;
+    const targetX = Number.isFinite(Number(raw.offsetX)) ? Number(raw.offsetX) : base.offsetX;
+    const targetY = Number.isFinite(Number(raw.offsetY)) ? Number(raw.offsetY) : base.offsetY;
+    const targetRotation = Number.isFinite(Number(raw.rotation)) ? Number(raw.rotation) : base.rotation * 0.35;
+
+    const scaleMin = clampFloat(Math.min(idealScale * 0.82, base.scale * 0.86), 0.58, 1.45);
+    const scaleMax = clampFloat(Math.max(idealScale * 1.18, base.scale * 1.14), 0.68, 1.58);
+
+    return {
+        scale: clampFloat(targetScale, scaleMin, scaleMax),
+        offsetX: clampNumber(targetX, Math.max(-72, base.offsetX - 18), Math.min(72, base.offsetX + 18)),
+        offsetY: clampNumber(targetY, Math.max(-72, base.offsetY - 18), Math.min(72, base.offsetY + 18)),
+        rotation: clampFloat(targetRotation, Math.max(-8, base.rotation - 4), Math.min(8, base.rotation + 4))
+    };
+}
+
+function syncTryOnCorrectionButtons(loading = false) {
+    if (loading) {
+        document.querySelectorAll('[data-kimi-correct]').forEach(button => {
+            button.disabled = true;
+            button.classList.add('is-loading');
+            button.textContent = '校正中';
+        });
+        return;
+    }
+    document.querySelectorAll('[data-kimi-correct]').forEach(button => {
+        button.disabled = false;
+        button.classList.remove('is-loading');
+    });
+    updateKimiCorrectionButtons(kimiCorrectionStatus === 'kimi' ? 'Kimi 校正' : '本地校正');
+}
+
 async function requestKimiTryOnCorrection() {
     const frame = getSelectedFrame();
     if (!frame) {
         showToast('先选择一副镜框');
         return;
     }
+    if (tryOnCorrectionRunning) {
+        showToast('正在校正，请稍等');
+        return;
+    }
     const metrics = getTryOnCorrectionMetrics();
-    const fallback = () => {
-        autoScaleSelectedGlasses();
-        const eyeAngle = Number(metrics.eyeAngle || 0);
-        previewGlassesRotation = Math.max(-12, Math.min(12, Math.round(previewGlassesRotation - eyeAngle * 0.15)));
-        syncGlassesControlInputs();
-        refreshCameraGlassesPayload();
-        drawFaceOverlay();
-        showToast('已用本地规则校正；Kimi 暂不可用');
+    if (!latestCameraResult?.landmarks && !latestPreviewMeshPoints?.length && !latestAnalysis?.previewMeshPoints?.length) {
+        showToast('先让摄像头识别到人脸，或先完成单张生成');
+        return;
+    }
+    const fallback = (message = '已用本地规则校正；Kimi 暂不可用') => {
+        applyTryOnAdjustment(buildClientTryOnAdjustment(metrics, frame, latestAnalysis || buildAnalysis({})));
+        showToast(message);
     };
 
+    tryOnCorrectionRunning = true;
+    syncTryOnCorrectionButtons(true);
     try {
-        const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6500);
+        const response = await fetch(`${API_BASE}/api/glasses/tryon/correct`, {
             method: 'POST',
+            signal: controller.signal,
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer sk-kimi-kjQIak7vVuUkT7YmbtqSxGWn8Kxwn7vRzufCeQ6pTU00GjqIPb81BD4IKW2y2tdB'
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                model: 'moonshot-v1-8k',
-                messages: [
-                    {
-                        role: 'system',
-                        content: '你是一个眼镜试戴校正助手。根据用户提供的眼镜参数、脸型分析和当前试戴指标，返回 JSON 格式的校正建议。只返回 JSON，不要其他文字。格式：{"scale": number, "offsetX": number, "offsetY": number, "rotation": number}'
-                    },
-                    {
-                        role: 'user',
-                        content: `镜框：${frame.name}，镜圈宽度 ${frame.lensWidth}mm，鼻梁 ${frame.bridgeSize}mm，材质 ${frame.material}，类型 ${frame.type}。脸型分析：脸宽 ${latestAnalysis?.faceWidth || 140}mm，瞳距 ${latestAnalysis?.pd || 63}mm，建议镜圈 ${latestAnalysis?.recommendedLensWidth || 51}mm。当前试戴参数：缩放 ${metrics.adjustment.scale}，左右偏移 ${metrics.adjustment.offsetX}，上下偏移 ${metrics.adjustment.offsetY}，旋转 ${metrics.adjustment.rotation}，双眼角度 ${metrics.eyeAngle}。请给出校正建议。`
-                    }
-                ],
-                temperature: 0.3
+                frame: {
+                    id: frame.id,
+                    name: frame.name,
+                    type: frame.type,
+                    material: frame.material,
+                    lensWidth: frame.lensWidth,
+                    bridgeSize: frame.bridgeSize,
+                    templeLength: frame.templeLength
+                },
+                analysis: {
+                    faceWidth: latestAnalysis?.faceWidth || 140,
+                    pd: latestAnalysis?.pd || 63,
+                    recommendedLensWidth: latestAnalysis?.recommendedLensWidth || 51,
+                    faceShape: latestAnalysis?.faceShape || '待分析'
+                },
+                metrics
             })
         });
-        const data = await response.json();
-        if (!response.ok || !data.choices?.[0]?.message?.content) throw new Error(data.error?.message || 'Kimi 校正失败');
-        const content = data.choices[0].message.content;
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        const adjustment = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+        clearTimeout(timeoutId);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.adjustment) throw new Error(data.error || 'Kimi 校正失败');
+        const adjustment = sanitizeTryOnAdjustment(data.adjustment);
         if (!adjustment) throw new Error('无法解析 Kimi 返回的校正数据');
         applyTryOnAdjustment(adjustment);
-        showToast('Kimi 已给出试戴校正');
+        showToast(data.provider === 'kimi' ? 'Kimi 已给出试戴校正' : '已用本地规则校正');
     } catch (error) {
         console.warn('Kimi try-on correction unavailable:', error);
-        fallback();
+        fallback(error?.name === 'AbortError' ? '校正请求超时，已用本地规则校正' : '已用本地规则校正；Kimi 暂不可用');
+    } finally {
+        tryOnCorrectionRunning = false;
+        syncTryOnCorrectionButtons(false);
     }
 }
 
-function applyTryOnAdjustment(adjustment = {}) {
-    if (Number.isFinite(Number(adjustment.scale))) {
-        previewGlassesScale = Math.max(0.55, Math.min(1.75, Number(adjustment.scale)));
-    }
-    if (Number.isFinite(Number(adjustment.offsetX))) {
-        previewGlassesOffsetX = Math.max(-90, Math.min(90, Number(adjustment.offsetX)));
-    }
-    if (Number.isFinite(Number(adjustment.offsetY))) {
-        previewGlassesOffsetY = Math.max(-90, Math.min(90, Number(adjustment.offsetY)));
-    }
-    if (Number.isFinite(Number(adjustment.rotation))) {
-        previewGlassesRotation = Math.max(-18, Math.min(18, Number(adjustment.rotation)));
-    }
+function applyTryOnAdjustment(adjustment = {}, options = {}) {
+    const safe = sanitizeTryOnAdjustment(adjustment, getCurrentTryOnAdjustment());
+    if (options.saveUndo !== false) previousTryOnAdjustment = getCurrentTryOnAdjustment();
+    previewGlassesScale = safe.scale;
+    previewGlassesOffsetX = safe.offsetX;
+    previewGlassesOffsetY = safe.offsetY;
+    previewGlassesRotation = safe.rotation;
     syncGlassesControlInputs();
     refreshCameraGlassesPayload();
     drawFaceOverlay();
+}
+
+function undoTryOnCorrection() {
+    if (!previousTryOnAdjustment) {
+        showToast('没有可撤销的校正');
+        return;
+    }
+    const restore = previousTryOnAdjustment;
+    previousTryOnAdjustment = null;
+    applyTryOnAdjustment(restore, { saveUndo: false });
+    showToast('已撤销上一次校正');
 }
 
 function togglePreviewKeypoints(button) {
@@ -2059,7 +2983,12 @@ function updateCameraStatus(status) {
     setText('mediapipe-camera-status', status);
     const panel = document.querySelector('.mediapipe-camera-panel');
     if (panel) {
+        const opening = status === '打开摄像头' || status === '准备识别';
+        const ready = status === '画面已打开' || status === '实时识别中';
+        panel.classList.toggle('camera-opening', opening);
+        panel.classList.toggle('camera-ready', ready || opening);
         panel.classList.toggle('camera-running', status === '实时识别中');
+        panel.classList.toggle('camera-error', status === '摄像机不可用' || status === '识别模型失败');
     }
 }
 
@@ -2249,7 +3178,7 @@ function renderRecommendations(recs = currentRecommendations) {
         <div class="recommendation-list">
             ${pageItems.map((r, i) => `
                 <div class="rec-card ${r.id === selected.id ? 'selected' : ''}" data-frame-id="${escapeHtml(r.id || getFrameImage(i).id)}">
-                    <button class="rec-image" type="button" onclick="openFrameImageViewer('${escapeHtml(r.id || getFrameImage(i).id)}')" aria-label="查看${escapeHtml(r.name)}全图">
+                    <button class="rec-image" type="button" onclick="openFrameImageViewer(${jsArg(r.id || getFrameImage(i).id)})" aria-label="查看${escapeHtml(r.name)}全图">
                         <img src="${escapeHtml(toAbsoluteAssetUrl(r.image || getFrameImage(i).src))}" alt="${escapeHtml(r.imageAlt || r.name)}" loading="lazy" decoding="async" onerror="handleFrameImageError(this)">
                     </button>
                     <div class="rec-title-row">
@@ -2260,9 +3189,9 @@ function renderRecommendations(recs = currentRecommendations) {
                     ${r.specs ? `<p class="rec-specs">${escapeHtml(r.specs)}</p>` : ''}
                     <p class="rec-reason">${escapeHtml(r.reason)}</p>
                     <div class="rec-actions">
-                        <button class="btn btn-secondary" onclick="selectFrameForTryOn('${escapeHtml(r.id || getFrameImage(i).id)}')">试戴这副</button>
-                        <button class="btn btn-secondary" onclick="openFrameImageViewer('${escapeHtml(r.id || getFrameImage(i).id)}')">看全图</button>
-                        <button class="btn btn-primary" onclick="addFrameToWishlist('${escapeHtml(r.id || getFrameImage(i).id)}')">加入心愿单</button>
+                        <button class="btn btn-secondary" onclick="selectFrameForTryOn(${jsArg(r.id || getFrameImage(i).id)})">试戴这副</button>
+                        <button class="btn btn-secondary" onclick="openFrameImageViewer(${jsArg(r.id || getFrameImage(i).id)})">看全图</button>
+                        <button class="btn btn-primary" onclick="addFrameToWishlist(${jsArg(r.id || getFrameImage(i).id)})">加入心愿单</button>
                     </div>
                 </div>
             `).join('')}
@@ -2295,14 +3224,14 @@ function renderTryOnStrip() {
                 const wished = isFrameInWishlist(frame.id);
                 return `
                     <div class="tryon-pill ${frame.id === selected.id ? 'selected' : ''}" data-frame-id="${escapeHtml(frame.id)}">
-                        <button class="tryon-pill-main" type="button" onclick="selectFrameForTryOn('${escapeHtml(frame.id)}')" aria-label="试戴${escapeHtml(frame.name)}">
+                        <button class="tryon-pill-main" type="button" onclick="selectFrameForTryOn(${jsArg(frame.id)})" aria-label="试戴${escapeHtml(frame.name)}">
                             <span class="tryon-pill-image">
                                 <img src="${escapeHtml(toAbsoluteAssetUrl(frame.image))}" alt="${escapeHtml(frame.imageAlt || frame.name)}" loading="lazy" decoding="async" onerror="handleFrameImageError(this)">
                             </span>
                             <span>${escapeHtml(frame.name)}</span>
                         </button>
-                        <button class="tryon-pill-wish" type="button" onclick="${wished ? `removeSelectedFrameFromWishlist('${escapeHtml(frame.id)}')` : `addSelectedFrameToWishlist('${escapeHtml(frame.id)}')`}">${wished ? '移出心愿单' : '加入心愿单'}</button>
-                        <button class="tryon-pill-view" type="button" onclick="openFrameImageViewer('${escapeHtml(frame.id)}')">看全图</button>
+                        <button class="tryon-pill-wish" type="button" onclick="${wished ? `removeSelectedFrameFromWishlist(${jsArg(frame.id)})` : `addSelectedFrameToWishlist(${jsArg(frame.id)})`}">${wished ? '移出心愿单' : '加入心愿单'}</button>
+                        <button class="tryon-pill-view" type="button" onclick="openFrameImageViewer(${jsArg(frame.id)})">看全图</button>
                     </div>
                 `;
             }).join('')}
@@ -2453,9 +3382,15 @@ function selectFrameForTryOn(frameId) {
     if (mediapipeCameraController) {
         mediapipeCameraController.setGlassesStyle(cameraGlassesStyle);
     }
+    if (previewGlassesScaleMode === 'auto') {
+        previewGlassesScale = estimateIdealGlassesScale(frame, latestAnalysis || buildAnalysis({}));
+        syncGlassesControlInputs();
+        refreshCameraGlassesPayload();
+    }
     updateSelectedFrameUI();
     drawModelPreview(latestAnalysis);
     drawFaceOverlay();
+    renderFrame3DPreview(frame);
     saveGlassesHomeState();
     showToast(`已切换为 ${frame.name}`);
 }
@@ -2481,13 +3416,38 @@ function saveGlassesHomeState() {
                 bridgeSize: frame.bridgeSize,
                 templeLength: frame.templeLength
             } : null,
+            tryOnImage: latestTryOnSnapshotDataUrl || readStoredTryOnSnapshot(),
+            customization: readSavedCustomizationData(),
             prescription: getSavedPrescriptionData()
         };
         localStorage.setItem(getHomeStateKey(uid), JSON.stringify(payload));
         localStorage.setItem('zz_glasses_home_state', JSON.stringify(payload));
         queueServerSync('home_state', payload);
+        return payload;
     } catch (error) {
         console.warn('Save glasses home state failed:', error);
+        return null;
+    }
+}
+
+function saveOnboardStepProgress(showMessage = true) {
+    const state = saveGlassesHomeState() || {};
+    const progress = {
+        ...state,
+        step: onboardStepIndex,
+        completedSteps: Array.from({ length: Math.max(0, onboardStepIndex - 1) }, (_, index) => index + 1),
+        actionSamples: latestCameraSamples.slice(-CAMERA_SAMPLE_LIMIT),
+        lastCameraImage: latestCameraFrameDataUrl || latestTryOnSnapshotDataUrl || '',
+        updatedAt: new Date().toISOString()
+    };
+    try {
+        localStorage.setItem(`zz_glasses_onboard_progress_${getCurrentUserId() || 'anonymous'}`, JSON.stringify(progress));
+        localStorage.setItem('zz_glasses_onboard_progress', JSON.stringify(progress));
+        queueServerSync('onboard_progress', progress);
+        if (showMessage) showToast('本步已保存');
+    } catch (error) {
+        console.warn('Save onboard progress failed:', error);
+        if (showMessage) showToast('本地保存失败，请稍后再试');
     }
 }
 
@@ -2499,6 +3459,33 @@ function getDisplayUserName() {
     return currentUser?.nickname || currentUser?.username || '匿名用户';
 }
 
+function getTryOnSnapshotKey(uid = getCurrentUserId()) {
+    return `zz_glasses_tryon_snapshot_${uid || 'anonymous'}`;
+}
+
+function readStoredTryOnSnapshot(uid = getCurrentUserId()) {
+    return localStorage.getItem(getTryOnSnapshotKey(uid))
+        || localStorage.getItem('zz_glasses_tryon_snapshot_last')
+        || '';
+}
+
+function storeTryOnSnapshot(dataUrl) {
+    if (!dataUrl || !String(dataUrl).startsWith('data:image/')) return;
+    latestTryOnSnapshotDataUrl = dataUrl;
+    // Large base64 images quickly exhaust localStorage. Keep the current session
+    // image in memory and only persist reasonably sized previews.
+    if (dataUrl.length > 1_200_000) {
+        console.warn('Try-on snapshot is too large for persistent browser cache');
+        return;
+    }
+    try {
+        localStorage.setItem(getTryOnSnapshotKey(), dataUrl);
+        localStorage.setItem('zz_glasses_tryon_snapshot_last', dataUrl);
+    } catch (error) {
+        console.warn('Store try-on snapshot failed:', error);
+    }
+}
+
 async function getTryOnSnapshotDataUrl() {
     const image = document.getElementById('face-preview-image');
     const overlay = document.getElementById('face-overlay-canvas');
@@ -2508,21 +3495,32 @@ async function getTryOnSnapshotDataUrl() {
         await new Promise(resolve => setTimeout(resolve, 180));
     }
     if (!image?.currentSrc || !overlay) {
+        const stored = readStoredTryOnSnapshot();
+        if (stored) {
+            latestTryOnSnapshotDataUrl = stored;
+            return stored;
+        }
         if (latestCameraFrameDataUrl) return latestCameraFrameDataUrl;
         latestTryOnSnapshotDataUrl = null;
         return null;
     }
-    drawFaceOverlay();
+    await ensureSelectedFrameImageReady();
+    if (overlay.width > 2 && overlay.height > 2) drawFaceOverlay();
     const canvas = document.createElement('canvas');
-    canvas.width = overlay.width || 1200;
-    canvas.height = overlay.height || 800;
+    const sourceImage = await loadImageFromDataUrl(image.currentSrc);
+    canvas.width = sourceImage.naturalWidth || overlay.width || 1200;
+    canvas.height = sourceImage.naturalHeight || overlay.height || 800;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const rect = getObjectContainRect(canvas, image);
-    ctx.drawImage(image, rect.x, rect.y, rect.width, rect.height);
-    ctx.drawImage(overlay, 0, 0, canvas.width, canvas.height);
+    const rect = { x: 0, y: 0, width: canvas.width, height: canvas.height };
+    ctx.drawImage(sourceImage, 0, 0, canvas.width, canvas.height);
+    const points = latestPreviewMeshPoints?.length ? latestPreviewMeshPoints : (latestAnalysis?.previewMeshPoints?.length ? latestAnalysis.previewMeshPoints : latestAnalysis?.meshPoints || []);
+    const mirrored = image.dataset.mirrored === '1';
+    if (previewKeypointsEnabled && points.length) drawPreviewKeypoints(ctx, rect, points, mirrored);
+    if (previewGlassesEnabled) drawPreviewGlasses(ctx, rect, points, mirrored);
     latestTryOnSnapshotDataUrl = canvas.toDataURL('image/png', 0.95);
+    storeTryOnSnapshot(latestTryOnSnapshotDataUrl);
     return latestTryOnSnapshotDataUrl;
 }
 
@@ -2546,7 +3544,7 @@ function getReportPayload() {
             bridgeSize: frame.bridgeSize,
             templeLength: frame.templeLength
         } : null,
-        tryOnImage: latestTryOnSnapshotDataUrl,
+        tryOnImage: latestTryOnSnapshotDataUrl || readStoredTryOnSnapshot(),
         prescription: getSavedPrescriptionData(),
         preferences: getPreferences()
     };
@@ -2923,7 +3921,7 @@ function renderWishlistPanel() {
                 const frame = item.frame || {};
                 return `
                     <article class="wishlist-item">
-                        <button class="wishlist-frame-image" type="button" onclick="openFrameImageViewer('${escapeHtml(frame.id || '')}')" aria-label="查看${escapeHtml(frame.name || '镜框')}全图">
+                        <button class="wishlist-frame-image" type="button" onclick="openFrameImageViewer(${jsArg(frame.id || '')})" aria-label="查看${escapeHtml(frame.name || '镜框')}全图">
                             <img src="${escapeHtml(toAbsoluteAssetUrl(frame.image || ''))}" alt="${escapeHtml(frame.imageAlt || frame.name || '镜框')}" onerror="handleFrameImageError(this)">
                         </button>
                         <div>
@@ -2931,8 +3929,8 @@ function renderWishlistPanel() {
                             <span>${escapeHtml(frame.merchantName || 'CHATGPT')} · 镜圈 ${escapeHtml(frame.lensWidth || '-')} mm / 鼻梁 ${escapeHtml(frame.bridgeSize || '-')} mm</span>
                         </div>
                         <div class="wishlist-actions">
-                            <button class="icon-toggle" type="button" onclick="openFrameImageViewer('${escapeHtml(frame.id || '')}')">全图</button>
-                            <button class="icon-toggle" type="button" onclick="removeWishlistItem('${escapeHtml(item.id)}')">移除</button>
+                            <button class="icon-toggle" type="button" onclick="openFrameImageViewer(${jsArg(frame.id || '')})">全图</button>
+                            <button class="icon-toggle" type="button" onclick="removeWishlistItem(${jsArg(item.id)})">移除</button>
                         </div>
                     </article>
                 `;
@@ -3038,19 +4036,21 @@ async function openGlassesReportImage() {
         showToast('先完成一次识别或手动参数录入');
         return;
     }
-    const win = window.open('', '_blank');
-    if (win) {
-        win.document.write('<title>正在生成配镜报告</title><body style="margin:0;background:#eef5f3;display:grid;place-items:center;min-height:100vh;font:700 18px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#10202a;">正在生成配镜报告...</body>');
+    showSaveImageBusy('正在生成配镜报告');
+    try {
+        const blob = await buildReportImageBlob();
+        const dataUrl = await blobToDataUrl(blob);
+        openSaveImageModal({
+            dataUrl,
+            filename: `glasses-report-${Date.now()}.png`,
+            title: '配镜报告',
+            kind: 'report'
+        });
+    } catch (error) {
+        closeSaveImageModal();
+        console.error('Build report image failed:', error);
+        showToast('生成报告图片失败，请重新试一次');
     }
-    const blob = await buildReportImageBlob();
-    const url = URL.createObjectURL(blob);
-    if (!win) {
-        downloadBlob(blob, `glasses-report-${Date.now()}.png`);
-        return;
-    }
-    win.document.open();
-    win.document.write(`<title>长按保存配镜报告</title><body style="margin:0;background:#eef5f3;display:grid;place-items:center;min-height:100vh;"><img src="${url}" alt="配镜报告" style="max-width:100%;height:auto;"></body>`);
-    win.document.close();
 }
 
 async function exportTryOnSnapshot() {
@@ -3064,23 +4064,276 @@ async function exportTryOnSnapshot() {
 }
 
 async function openTryOnSnapshot() {
-    const win = window.open('', '_blank');
-    if (win) {
-        win.document.write('<title>正在生成试戴图</title><body style="margin:0;background:#eef5f3;display:grid;place-items:center;min-height:100vh;font:700 18px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#10202a;">正在生成试戴图...</body>');
-    }
+    showSaveImageBusy('正在生成试戴图');
     const dataUrl = await getTryOnSnapshotDataUrl();
     if (!dataUrl) {
-        if (win) win.close();
+        closeSaveImageModal();
         showToast('先完成单张生成或摄像头采集');
         return;
     }
-    if (!win) {
-        downloadBlob(dataUrlToBlob(dataUrl), `glasses-tryon-${Date.now()}.png`);
+    openSaveImageModal({
+        dataUrl,
+        filename: `glasses-tryon-${Date.now()}.png`,
+        title: '试戴图',
+        kind: 'tryon'
+    });
+}
+
+let latestSaveImagePayload = null;
+
+function showSaveImageBusy(text = '正在生成图片') {
+    const modal = ensureSaveImageModal();
+    modal.querySelector('[data-save-title]').textContent = text;
+    modal.querySelector('[data-save-hint]').textContent = '请稍等，正在把当前画面整理成可保存图片。';
+    const stage = modal.querySelector('[data-save-stage]');
+    stage.innerHTML = '<div class="save-image-loading"><span></span><strong>处理中</strong><p>不要离开当前页面</p></div>';
+    modal.querySelector('[data-save-download]').removeAttribute('href');
+    modal.querySelector('[data-save-download]').setAttribute('aria-disabled', 'true');
+    modal.querySelector('[data-save-share]').disabled = true;
+    modal.querySelector('[data-save-wechat]').disabled = true;
+    modal.querySelector('[data-save-standalone]').disabled = true;
+    modal.classList.add('active');
+    document.body.classList.add('save-modal-open');
+}
+
+function openSaveImageModal(payload) {
+    latestSaveImagePayload = {
+        ...payload,
+        createdAt: new Date().toISOString()
+    };
+    const modal = ensureSaveImageModal();
+    const title = modal.querySelector('[data-save-title]');
+    const hint = modal.querySelector('[data-save-hint]');
+    const stage = modal.querySelector('[data-save-stage]');
+    const download = modal.querySelector('[data-save-download]');
+    const filename = latestSaveImagePayload.filename || `glasses-image-${Date.now()}.png`;
+
+    cleanupOldSavePayloads();
+    title.textContent = latestSaveImagePayload.title || '保存图片';
+    hint.textContent = isLikelyTouchDevice()
+        ? '可用系统分享，也可在微信内点“微信内分享”。不支持时可下载或长按保存。'
+        : '可以直接下载，也可以右键图片另存。';
+    stage.innerHTML = '<img data-save-image alt="铮铮眼镜图片">';
+    const image = stage.querySelector('[data-save-image]');
+    image.src = latestSaveImagePayload.dataUrl;
+    image.alt = latestSaveImagePayload.title || '铮铮眼镜图片';
+    download.href = latestSaveImagePayload.dataUrl;
+    download.download = filename;
+    download.removeAttribute('aria-disabled');
+    modal.querySelector('[data-save-share]').disabled = false;
+    modal.querySelector('[data-save-wechat]').disabled = false;
+    modal.querySelector('[data-save-standalone]').disabled = false;
+    modal.classList.add('active');
+    document.body.classList.add('save-modal-open');
+}
+
+function ensureSaveImageModal() {
+    let modal = document.getElementById('save-image-modal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'save-image-modal';
+    modal.className = 'save-image-modal';
+    modal.innerHTML = `
+        <div class="save-image-dialog" role="dialog" aria-modal="true" aria-labelledby="save-image-title">
+            <div class="save-image-head">
+                <div>
+                    <p class="eyebrow">保存到设备</p>
+                    <h2 id="save-image-title" data-save-title>保存图片</h2>
+                    <p data-save-hint>可以长按图片保存，也可以直接下载。</p>
+                </div>
+                <button class="modal-close" type="button" onclick="closeSaveImageModal()" aria-label="关闭">&times;</button>
+            </div>
+            <div class="save-image-stage">
+                <div data-save-stage class="save-image-stage-inner">
+                    <img data-save-image alt="铮铮眼镜图片">
+                </div>
+            </div>
+            <div class="save-image-actions">
+                <a class="btn btn-primary" data-save-download href="#" download="glasses-image.png">下载图片</a>
+                <button class="btn btn-secondary" data-save-share type="button" onclick="shareSaveImage()">系统分享</button>
+                <button class="btn btn-secondary" data-save-wechat type="button" onclick="shareSaveImageToWechat()">微信内分享</button>
+                <button class="btn btn-secondary" data-save-standalone type="button" onclick="openSaveImageStandalone()">备用保存页</button>
+                <button class="btn btn-secondary" type="button" onclick="closeSaveImageModal()">回到流程</button>
+            </div>
+        </div>
+    `;
+    modal.addEventListener('click', event => {
+        if (event.target === modal) closeSaveImageModal();
+    });
+    document.body.appendChild(modal);
+    return modal;
+}
+
+function closeSaveImageModal() {
+    const modal = document.getElementById('save-image-modal');
+    if (!modal) return;
+    modal.classList.remove('active');
+    document.body.classList.remove('save-modal-open');
+}
+
+function openSaveImageStandalone() {
+    if (!latestSaveImagePayload?.dataUrl) {
+        showToast('没有可保存的图片');
         return;
     }
-    win.document.open();
-    win.document.write(`<title>长按保存试戴图</title><body style="margin:0;background:#eef5f3;display:grid;place-items:center;min-height:100vh;"><img src="${dataUrl}" alt="试戴图" style="max-width:100%;height:auto;"></body>`);
-    win.document.close();
+    const key = `zz_glasses_save_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const stored = storeSaveImagePayload(key, latestSaveImagePayload);
+    if (!stored) {
+        const blob = dataUrlToBlob(latestSaveImagePayload.dataUrl);
+        const blobUrl = URL.createObjectURL(blob);
+        const win = window.open(blobUrl, '_blank', 'noopener');
+        if (!win) downloadBlob(blob, latestSaveImagePayload.filename || `glasses-image-${Date.now()}.png`);
+        showToast('设备存储空间不足，已改用浏览器图片页');
+        return;
+    }
+    const url = new URL('./save.html', window.location.href);
+    url.searchParams.set('key', key);
+    const win = window.open(url.href, '_blank', 'noopener');
+    if (!win) {
+        showToast('浏览器拦截了新页面，当前面板仍可长按保存');
+    }
+}
+
+async function shareSaveImage() {
+    if (!latestSaveImagePayload?.dataUrl) {
+        showToast('没有可分享的图片');
+        return;
+    }
+    const filename = latestSaveImagePayload.filename || `glasses-image-${Date.now()}.png`;
+    const blob = dataUrlToBlob(latestSaveImagePayload.dataUrl);
+    const file = new File([blob], filename, { type: blob.type || 'image/png' });
+    try {
+        if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+            await navigator.share({
+                title: latestSaveImagePayload.title || '铮铮眼镜图片',
+                text: '来自铮铮眼镜的试戴或配镜报告图片，可分享到微信。',
+                files: [file]
+            });
+            return;
+        }
+    } catch (error) {
+        if (error?.name === 'AbortError') return;
+        console.warn('Share image failed:', error);
+    }
+    downloadBlob(blob, filename);
+    showToast(getWechatShareFallbackText());
+}
+
+function getWechatShareFallbackText() {
+    const ua = navigator.userAgent || '';
+    if (/MicroMessenger/i.test(ua)) {
+        return '微信内浏览器不支持直接发图片时，请长按图片保存，或点右上角分享';
+    }
+    return '当前浏览器不能直接调起微信，已改为下载图片';
+}
+
+function shareSaveImageToWechat() {
+    if (!latestSaveImagePayload?.dataUrl) {
+        showToast('没有可分享的图片');
+        return;
+    }
+    if (!isInWechatBrowser()) {
+        showToast('当前不在微信浏览器内，已打开系统分享');
+        shareSaveImage();
+        return;
+    }
+    const bridge = window.WeixinJSBridge;
+    if (!bridge?.invoke) {
+        showToast('微信分享组件还没准备好，请稍等一秒再点');
+        document.addEventListener('WeixinJSBridgeReady', () => shareSaveImageToWechat(), { once: true });
+        return;
+    }
+    const sharePayload = buildWechatSharePayload(latestSaveImagePayload);
+    try {
+        bridge.invoke('sendAppMessage', sharePayload, result => {
+            const message = String(result?.err_msg || '');
+            if (/ok|confirm/i.test(message)) {
+                showToast('已打开微信分享');
+            } else {
+                showWechatShareGuide();
+            }
+        });
+    } catch (error) {
+        console.warn('Wechat direct share failed:', error);
+        showWechatShareGuide();
+    }
+}
+
+function buildWechatSharePayload(payload) {
+    const link = window.location.href.split('#')[0];
+    return {
+        appid: '',
+        img_url: payload.dataUrl,
+        img_width: '640',
+        img_height: '640',
+        link,
+        title: payload.title || '铮铮眼镜图片',
+        desc: '来自铮铮眼镜的试戴或配镜报告图片'
+    };
+}
+
+function isInWechatBrowser() {
+    return /MicroMessenger/i.test(navigator.userAgent || '');
+}
+
+function showWechatShareGuide() {
+    const modal = ensureSaveImageModal();
+    const hint = modal.querySelector('[data-save-hint]');
+    if (hint) {
+        hint.textContent = '微信限制网页直接发图片时，请点右上角“...”分享，或长按图片保存后发给好友。';
+    }
+    showToast('微信限制直接发送时，请用右上角分享或长按保存');
+}
+
+function storeSaveImagePayload(key, payload) {
+    const value = JSON.stringify({
+        ...payload,
+        expiresAt: Date.now() + 10 * 60 * 1000
+    });
+    let ok = false;
+    try {
+        sessionStorage.setItem(key, value);
+        ok = true;
+    } catch (error) {
+        console.warn('Save image session storage failed:', error);
+    }
+    try {
+        localStorage.setItem(key, value);
+        ok = true;
+    } catch (error) {
+        console.warn('Save image local storage failed:', error);
+    }
+    return ok;
+}
+
+function cleanupOldSavePayloads() {
+    try {
+        Object.keys(localStorage)
+            .filter(key => key.startsWith('zz_glasses_save_'))
+            .forEach(key => {
+                try {
+                    const payload = JSON.parse(localStorage.getItem(key) || '{}');
+                    if (!payload.expiresAt || payload.expiresAt < Date.now()) localStorage.removeItem(key);
+                } catch (error) {
+                    localStorage.removeItem(key);
+                }
+            });
+    } catch (error) {
+        console.warn('Cleanup save payloads failed:', error);
+    }
+}
+
+function isLikelyTouchDevice() {
+    return navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches;
+}
+
+function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
 }
 
 function dataUrlToBlob(dataUrl) {
@@ -3181,19 +4434,15 @@ async function createGlassesOrder(frameId) {
         analysis.templeLabel
     ].join(' / ');
 
-    if (!REMOTE_SHOP_API_ENABLED) {
-        const order = saveLocalGlassesOrder(frame, customParams, analysis);
-        showToast(`已保存为本机意向单 ${order.id}，商家页可查看`);
-        return;
-    }
-
     try {
-        const response = await fetch(`${API_BASE}/api/glasses/order/create-shop`, {
+        const response = await fetch(`${API_BASE}/api/shop/glasses/orders`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 uid: currentUser.uid,
                 username: currentUser.nickname || currentUser.username || '戴镜用户',
+                contact: currentUser.nickname || currentUser.username || currentUser.uid,
+                frameId: frame.id,
                 frame,
                 customParams,
                 analysis,
@@ -3204,7 +4453,7 @@ async function createGlassesOrder(frameId) {
         if (!response.ok || !data.success) {
             throw new Error(data.error || '订单提交失败');
         }
-        showToast(`已发送给 ${frame.merchantName || '商家'}，订单号 ${data.orderId}`);
+        showToast(`已保存到服务器，订单号 ${data.orderId}`);
     } catch (error) {
         console.warn('Remote glasses order unavailable, saving locally:', error.message);
         const order = saveLocalGlassesOrder(frame, customParams, analysis);
@@ -3271,11 +4520,12 @@ function writeLocalArray(key, value) {
 }
 
 function queueServerSync(type, payload) {
+    const uid = getCurrentUserId();
     const record = {
         id: `sync_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         type,
-        uid: getCurrentUserId(),
-        payload,
+        uid,
+        payload: compactSyncPayload(payload),
         createdAt: new Date().toISOString()
     };
     try {
@@ -3284,11 +4534,30 @@ function queueServerSync(type, payload) {
     } catch (error) {
         console.warn('Queue server sync failed:', error);
     }
+    if (!uid || !navigator.onLine) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 7000);
     fetch(`${API_BASE}/api/glasses/session/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(record)
-    }).catch(error => console.warn('Remote session sync unavailable:', error.message));
+        body: JSON.stringify(record),
+        signal: controller.signal
+    }).catch(error => console.warn('Remote session sync unavailable:', error.message))
+        .finally(() => clearTimeout(timer));
+}
+
+function compactSyncPayload(payload) {
+    try {
+        return JSON.parse(JSON.stringify(payload, (key, value) => {
+            if (typeof value === 'string' && value.startsWith('data:image/') && value.length > 180_000) {
+                return '[image kept on device]';
+            }
+            if (key === 'actionSamples' && Array.isArray(value)) return value.slice(-6);
+            return value;
+        }));
+    } catch (error) {
+        return {};
+    }
 }
 
 function handleDragOver(e) {
@@ -3510,8 +4779,14 @@ function setPreviewFromCameraFrame(video) {
 
     const dataUrl = captureCameraFrameDataUrl(video);
     if (!dataUrl) return;
+    setPreviewFromDataUrl(dataUrl, cameraFacingMode === 'user');
+}
+
+function setPreviewFromDataUrl(dataUrl, mirrored = cameraFacingMode === 'user') {
+    const previewImage = document.getElementById('face-preview-image');
+    if (!previewImage || !dataUrl) return;
     latestCameraFrameDataUrl = dataUrl;
-    previewImage.dataset.mirrored = '1';
+    previewImage.dataset.mirrored = mirrored ? '1' : '0';
     previewImage.onload = () => drawFaceOverlay();
     previewImage.src = dataUrl;
     showFaceResultPanel();
@@ -3530,8 +4805,10 @@ function captureCameraFrameDataUrl(video) {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
+    if (cameraFacingMode === 'user') {
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+    }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL('image/jpeg', 0.9);
 }
@@ -3659,6 +4936,13 @@ window.onclick = function(e) {
     }
 };
 
+window.addEventListener('pagehide', () => {
+    if (mediapipeCameraController) {
+        mediapipeCameraController.stop();
+        mediapipeCameraController = null;
+    }
+});
+
 Object.assign(window, {
     openFrameImageViewer,
     closeFrameImageViewer,
@@ -3668,10 +4952,52 @@ Object.assign(window, {
     handleFrameImageError,
     retakeFacePhoto,
     recalibrateCurrentFace,
+    setOnboardStep,
+    handleOnboardNext,
+    finishOnboardFlow,
+    saveOnboardStepProgress,
+    startMediapipeCamera,
+    switchMediapipeCamera,
+    stopMediapipeCamera,
+    captureMediapipeModel,
+    startActionCapture,
+    resetActionCapture,
+    skipCurrentActionCaptureStep,
+    toggleMediapipeMesh,
+    toggleMediapipeGlasses,
+    toggleCameraFacing,
+    setMediapipeGlasses,
+    updatePreviewGlassesControl,
+    resetPreviewGlassesControls,
+    autoScaleSelectedGlasses,
+    togglePreviewKeypoints,
+    togglePreviewGlasses,
+    exportTryOnSnapshot,
+    openTryOnSnapshot,
+    exportGlassesReportImage,
+    openGlassesReportImage,
+    exportGlassesReportJSON,
+    exportGlassesFlowHTML,
+    changeTextScale,
+    rerunAnalysis,
+    startFaceModeling,
+    submitModeling,
+    goToLogin,
+    goToRegister,
+    createTemporaryFittingUser,
+    closeModal,
     requestKimiTryOnCorrection,
+    undoTryOnCorrection,
+    fillCustomizationFromAnalysis,
+    saveCustomizationData,
+    sendCustomizationToChat,
     savePrescriptionData,
     clearPrescriptionData,
-    sendWishlistToMerchant
+    sendWishlistToMerchant,
+    openSaveImageStandalone,
+    shareSaveImage,
+    shareSaveImageToWechat,
+    closeSaveImageModal
 });
 
 if (document.readyState === 'loading') {

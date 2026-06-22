@@ -1,13 +1,75 @@
+const HOME_AUTH_RETURN_PARAMS = [
+    'user',
+    'passport_user',
+    'account',
+    'passport_uid',
+    'uid',
+    'user_id',
+    'username',
+    'nickname',
+    'name',
+    'avatar'
+];
+
+function parseMaybeEncodedJson(raw) {
+    if (!raw) return null;
+    const attempts = [];
+    let value = String(raw);
+    for (let i = 0; i < 3; i += 1) {
+        attempts.push(value);
+        try {
+            const decoded = decodeURIComponent(value);
+            if (decoded === value) break;
+            value = decoded;
+        } catch (error) {
+            break;
+        }
+    }
+    for (const candidate of [...new Set(attempts)]) {
+        try {
+            const parsed = JSON.parse(candidate);
+            if (parsed && typeof parsed === 'object') return parsed;
+        } catch (error) {}
+    }
+    return null;
+}
+
+function normalizeAuthUser(user, fallback = {}) {
+    const normalized = {
+        ...user,
+        uid: user?.uid || user?.id || fallback.uid || fallback.id || '',
+        username: user?.username || user?.nickname || user?.name || fallback.username || fallback.nickname || fallback.name || '',
+        nickname: user?.nickname || user?.username || user?.name || fallback.nickname || fallback.username || fallback.name || '',
+        avatar: user?.avatar || fallback.avatar || '',
+        source: user?.source || fallback.source || 'passport'
+    };
+    normalized.temporary = Boolean(user?.temporary || fallback.temporary);
+    return normalized.uid ? normalized : null;
+}
+
 function readUserFromUrl() {
     const params = new URLSearchParams(window.location.search);
-    const raw = params.get('user');
-    if (!raw) return null;
-    try {
-        return JSON.parse(decodeURIComponent(raw));
-    } catch (error) {
-        console.warn('Parse user from URL failed:', error);
-        return null;
-    }
+    const jsonUser = parseMaybeEncodedJson(params.get('user'))
+        || parseMaybeEncodedJson(params.get('passport_user'))
+        || parseMaybeEncodedJson(params.get('account'));
+    if (jsonUser?.uid || jsonUser?.id) return normalizeAuthUser(jsonUser);
+
+    const uid = params.get('passport_uid') || params.get('uid') || params.get('user_id');
+    if (!uid) return null;
+    return normalizeAuthUser({}, {
+        uid,
+        username: params.get('username') || params.get('nickname') || params.get('name') || '通行证用户',
+        avatar: params.get('avatar') || '',
+        source: 'passport'
+    });
+}
+
+function cleanupAuthReturnParams() {
+    const url = new URL(window.location.href);
+    const hadAuthParam = HOME_AUTH_RETURN_PARAMS.some(param => url.searchParams.has(param));
+    if (!hadAuthParam) return;
+    HOME_AUTH_RETURN_PARAMS.forEach(param => url.searchParams.delete(param));
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
 }
 
 function readCurrentUser() {
@@ -18,6 +80,8 @@ function readCurrentUser() {
         } else {
             localStorage.setItem('zz_passport_user', JSON.stringify(urlUser));
         }
+        sessionStorage.removeItem('zz_glasses_ignore_user_param');
+        cleanupAuthReturnParams();
         return urlUser;
     }
     const tempUser = safeParseSessionUser();
@@ -61,8 +125,7 @@ function readLocalArray(key) {
 }
 
 function carryUserToInternalLinks(user) {
-    const rawUser = new URLSearchParams(window.location.search).get('user');
-    const userParam = rawUser || (user?.uid ? JSON.stringify(user) : '');
+    const userParam = user?.uid ? JSON.stringify(user) : '';
     if (!userParam) return;
 
     document.querySelectorAll('.carry-user-link').forEach(link => {
@@ -74,10 +137,12 @@ function carryUserToInternalLinks(user) {
 
 function buildPassportUrl(page) {
     const redirect = new URL(window.location.href);
-    redirect.searchParams.delete('passport_uid');
+    HOME_AUTH_RETURN_PARAMS.forEach(param => redirect.searchParams.delete(param));
     const url = new URL(`https://zhengzhengstudio.cn/passport/${page}.html`);
     url.searchParams.set('redirect', redirect.href);
     url.searchParams.set('from', 'glasses');
+    url.searchParams.set('scope', 'glasses');
+    url.searchParams.set('returnUser', '1');
     return url.href;
 }
 
@@ -88,9 +153,48 @@ function updateAuthLinks() {
     if (register) register.href = buildPassportUrl('register');
 }
 
+function createHomeTemporaryUser(event) {
+    event?.preventDefault();
+    const input = document.getElementById('home-temp-fitting-name');
+    const username = (input?.value || '').trim() || '临时配镜用户';
+    const user = {
+        uid: `temp_glasses_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        username,
+        nickname: username,
+        temporary: true,
+        createdAt: new Date().toISOString(),
+        source: 'glasses'
+    };
+    sessionStorage.setItem('zz_glasses_temp_user', JSON.stringify(user));
+    sessionStorage.removeItem('zz_glasses_ignore_user_param');
+    renderHomeUser();
+}
+
 function setText(id, value) {
     const el = document.getElementById(id);
     if (el) el.textContent = value;
+}
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, s => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[s]));
+}
+
+function safeImageUrl(value) {
+    const src = String(value || '').trim();
+    if (!src) return '';
+    if (/^data:image\/(png|jpe?g|webp);base64,/i.test(src)) return src;
+    try {
+        const url = new URL(src, window.location.href);
+        return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+    } catch (error) {
+        return '';
+    }
 }
 
 function renderHomeState(user) {
@@ -116,7 +220,7 @@ function renderHomeState(user) {
     if (frame) {
         const image = document.getElementById('home-current-frame');
         if (image && frame.image) {
-            image.src = new URL(frame.image, window.location.href).href;
+            image.src = safeImageUrl(frame.image) || 'assets/glasses-frame-black-rectangle-v1.png';
             image.alt = frame.imageAlt || frame.name || '当前试戴镜框';
         }
         setText('home-frame-caption', `${frame.name || '当前镜框'}，${frame.merchantName || 'CHATGPT'} · ${frame.type || '镜框'}`);
@@ -139,6 +243,17 @@ function renderHomeUser() {
     if (!user?.uid) {
         setText('home-user-name', '匿名用户');
         setText('home-status-user', '匿名体验');
+        const actions = document.getElementById('home-user-actions');
+        if (actions) {
+            actions.innerHTML = `
+                <a class="btn btn-secondary" id="home-login-link" href="${buildPassportUrl('login')}">登录</a>
+                <a class="btn btn-primary" id="home-register-link" href="${buildPassportUrl('register')}">注册</a>
+                <form class="temp-user-form home-temp-user-form" onsubmit="createHomeTemporaryUser(event)">
+                    <input id="home-temp-fitting-name" type="text" maxlength="24" placeholder="临时用户名">
+                    <button class="btn btn-secondary" type="submit">临时配镜</button>
+                </form>
+            `;
+        }
         return;
     }
 
@@ -159,7 +274,7 @@ function renderHomeUser() {
     saveState.textContent = readHomeState(user)?.analysis ? '已有采集记录' : (isTemporary ? '会话内保存' : '可保存');
     nextStep.textContent = readHomeState(user)?.analysis ? '查看/继续试戴' : '继续试戴';
     actions.innerHTML = `
-        <span class="home-user-pill">${name}${isTemporary ? ' · 临时' : ''}</span>
+        <span class="home-user-pill">${escapeHtml(name)}${isTemporary ? ' · 临时' : ''}</span>
         <button class="btn btn-secondary" type="button" id="home-logout">${isTemporary ? '清除临时用户' : '退出'}</button>
     `;
     document.getElementById('home-logout').addEventListener('click', () => {

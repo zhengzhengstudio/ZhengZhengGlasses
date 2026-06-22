@@ -120,36 +120,57 @@ export async function createMediapipeCamera(options) {
         throw new Error('video and canvas are required');
     }
 
-    onStatus('loading');
-    const landmarker = externalLandmarker || await getFaceLandmarker('VIDEO');
-    const stream = await openCameraStream(facingMode);
+    let currentFacingMode = facingMode;
+    onStatus('opening');
+    let stream = await openCameraStream(currentFacingMode);
 
     video.srcObject = stream;
     video.setAttribute('playsinline', 'true');
     await video.play();
+    onStatus('preview');
+    onStatus('loading');
 
     let active = true;
+    let landmarker = externalLandmarker || null;
+    let landmarkerError = null;
     let lastVideoTime = -1;
     let lastResult = null;
     let lastDetectAt = 0;
     let currentDrawMesh = drawMesh;
     let currentDrawGlasses = drawGlasses;
     let currentGlassesStyle = glassesStyle;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
+    let animationFrameId = 0;
 
-    const isMobile = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches;
-    const baseMinInterval = faceActionCaptureActive() ? 42 : (isMobile ? 100 : 58);
+    if (!landmarker) {
+        getFaceLandmarker('VIDEO')
+            .then(value => {
+                if (!active) return;
+                landmarker = value;
+                onStatus('running');
+            })
+            .catch(error => {
+                landmarkerError = error;
+                onStatus('model_error');
+            });
+    } else {
+        onStatus('running');
+    }
 
     function loop() {
         if (!active) return;
+        if (document.hidden) {
+            animationFrameId = requestAnimationFrame(loop);
+            return;
+        }
         const vw = video.videoWidth || 1;
         const vh = video.videoHeight || 1;
         if (canvas.width !== vw) canvas.width = vw;
         if (canvas.height !== vh) canvas.height = vh;
 
         const now = performance.now();
-        const minDetectInterval = faceActionCaptureActive() ? 42 : baseMinInterval;
-        if (video.currentTime !== lastVideoTime && now - lastDetectAt >= minDetectInterval) {
+        const minDetectInterval = getDetectInterval();
+        if (landmarker && video.currentTime !== lastVideoTime && now - lastDetectAt >= minDetectInterval) {
             lastVideoTime = video.currentTime;
             lastDetectAt = now;
             const result = landmarker.detectForVideo(video, now);
@@ -170,27 +191,31 @@ export async function createMediapipeCamera(options) {
             } else {
                 onResult(null);
             }
+        } else if (!landmarker) {
+            clearCanvas(ctx, canvas);
         }
 
-        requestAnimationFrame(loop);
+        animationFrameId = requestAnimationFrame(loop);
     }
 
-    onStatus('running');
     loop();
 
     return {
         stop() {
             active = false;
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
             clearCanvas(ctx, canvas);
             stream.getTracks().forEach(track => track.stop());
             video.srcObject = null;
             onStatus('stopped');
         },
         async switchCamera(newFacingMode) {
-            if (!newFacingMode || newFacingMode === facingMode) return;
-            onStatus('loading');
+            if (!newFacingMode || newFacingMode === currentFacingMode) return;
+            onStatus('opening');
             stream.getTracks().forEach(track => track.stop());
             const newStream = await openCameraStream(newFacingMode);
+            stream = newStream;
+            currentFacingMode = newFacingMode;
             video.srcObject = newStream;
             await video.play();
             onStatus('running');
@@ -206,6 +231,12 @@ export async function createMediapipeCamera(options) {
         },
         getLastResult() {
             return lastResult;
+        },
+        getModelState() {
+            return {
+                ready: Boolean(landmarker),
+                error: landmarkerError
+            };
         }
     };
 }
@@ -218,6 +249,13 @@ function faceActionCaptureActive() {
     }
 }
 
+function getDetectInterval() {
+    const isSmallScreen = typeof window !== 'undefined'
+        && (window.matchMedia?.('(max-width: 760px)').matches || window.innerWidth < 760);
+    if (faceActionCaptureActive()) return isSmallScreen ? 70 : 46;
+    return isSmallScreen ? 112 : 64;
+}
+
 async function openCameraStream(facingMode) {
     const video = preferredVideoConstraints(facingMode);
 
@@ -226,9 +264,10 @@ async function openCameraStream(facingMode) {
     } catch (error) {
         return navigator.mediaDevices.getUserMedia({
             video: {
-                facingMode,
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
+                facingMode: { ideal: facingMode },
+                width: { ideal: 960, max: 1280 },
+                height: { ideal: 720, max: 960 },
+                frameRate: { ideal: 24, max: 30 }
             },
             audio: false
         });
@@ -242,26 +281,29 @@ function preferredVideoConstraints(facingMode) {
 
     if (isMobile) {
         return {
-            facingMode,
-            width: { ideal: 640 },
-            height: { ideal: 480 },
+            facingMode: { ideal: facingMode },
+            width: { ideal: 640, max: 960 },
+            height: { ideal: 480, max: 720 },
+            frameRate: { ideal: 24, max: 30 },
             aspectRatio: { ideal: 1.333333 }
         };
     }
 
     if (isPortraitViewport) {
         return {
-            facingMode,
-            width: { ideal: 720 },
-            height: { ideal: 1280 },
+            facingMode: { ideal: facingMode },
+            width: { ideal: 720, max: 960 },
+            height: { ideal: 960, max: 1280 },
+            frameRate: { ideal: 24, max: 30 },
             aspectRatio: { ideal: 0.75 }
         };
     }
 
     return {
-        facingMode,
-        width: { ideal: 1280 },
-        height: { ideal: 960 },
+        facingMode: { ideal: facingMode },
+        width: { ideal: 1280, max: 1280 },
+        height: { ideal: 720, max: 960 },
+        frameRate: { ideal: 24, max: 30 },
         aspectRatio: { ideal: 1.333333 }
     };
 }
@@ -294,13 +336,13 @@ export function analyzeFaceAction(landmarks) {
         mouthOpen: Number(mouthOpen.toFixed(3)),
         eyeOpen: Number(eyeOpen.toFixed(3)),
         matched: {
-            front: Math.abs(yaw) < 0.05 && mouthOpen < 0.04 && eyeOpen > 0.01,
-            left: yaw > 0.05,
-            right: yaw < -0.05,
-            up: pitch < 0.3,
-            down: pitch > 0.4,
-            mouth: mouthOpen > 0.042,
-            blink: eyeOpen < 0.015
+            front: Math.abs(yaw) < 0.2 && mouthOpen < 0.08 && eyeOpen > 0.004,
+            left: yaw < -0.012,
+            right: yaw > 0.012,
+            up: pitch < 0.405,
+            down: pitch > 0.295,
+            mouth: mouthOpen > 0.02,
+            blink: eyeOpen < 0.022
         }
     };
 }
@@ -386,7 +428,7 @@ function drawGlassesOverlay(ctx, canvas, landmarks, style) {
     const centerY = (screenLeftEye.y + screenRightEye.y) / 2 + pd * 0.12 + Number(style?.offsetY || 0);
     const overlayScale = Number(style?.scale || style?.overlayScale || 1);
     const extraRotation = Number(style?.rotation || 0) * Math.PI / 180;
-    const overlayWidth = pd * 3.55 * Math.max(0.72, Math.min(1.45, overlayScale));
+    const overlayWidth = pd * 3.55 * Math.max(0.5, Math.min(1.9, overlayScale));
     const overlayHeight = overlayWidth * (image.naturalHeight / image.naturalWidth);
     ctx.translate(centerX, centerY);
     ctx.rotate(angle + extraRotation);

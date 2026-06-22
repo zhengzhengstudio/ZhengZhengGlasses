@@ -5,7 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="铮铮眼镜为戴镜人士提供在线脸型识别、配镜参数分析、镜框推荐与定制参考。">
     <title>铮铮眼镜 - 引导流程</title>
-    <link rel="stylesheet" href="style.css?v=20260520-tryonfix1">
+    <link rel="icon" href="assets/favicon.png?v=20260621-app3" type="image/png">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=20260621-app3">
+    <link rel="manifest" href="site.webmanifest?v=20260621-app3">
+    <link rel="stylesheet" href="style.css?v=20260621-actionfix1">
 </head>
 <body class="customer-page onboard-page">
     <div class="glasses-container">
@@ -47,7 +50,7 @@
                 </div>
                 <div class="hero-visual" aria-label="镜框图片预览">
                     <figure class="hero-product-card">
-                        <img src="assets/glasses-frame-ai-01.png?v=20260517-ai80" alt="当前可试戴镜框">
+                        <img src="assets/glasses-frame-ai-01.png?v=20260621-actionfix1" alt="当前可试戴镜框">
                         <figcaption>
                             <span>单镜试戴</span>
                             <strong>先选一副，再换下一副</strong>
@@ -85,8 +88,15 @@
                 <div class="onboard-step">
                     <span>4</span>
                     <div>
-                        <h3>报告与沟通</h3>
-                        <p>导出报告，把心愿单和最后一次采集数据发给商家或铮铮。</p>
+                        <h3>报告与导出</h3>
+                        <p>导出报告，核对心愿单和最后一次实拍试戴图。</p>
+                    </div>
+                </div>
+                <div class="onboard-step">
+                    <span>5</span>
+                    <div>
+                        <h3>定制镜框</h3>
+                        <p>确认毫米标定、3D 模型参数、验光单和要发给商家的定制需求。</p>
                     </div>
                 </div>
             </section>
@@ -169,14 +179,15 @@
                                 <span>旋转 <b id="preview-rotation-value">0°</b></span>
                                 <input id="preview-glasses-rotation" type="range" min="-18" max="18" value="0" oninput="updatePreviewGlassesControl('rotation', this.value)">
                             </label>
-                            <button class="btn btn-secondary" type="button" onclick="requestKimiTryOnCorrection()">Kimi 校正</button>
+                            <button class="btn btn-secondary" type="button" data-kimi-correct onclick="requestKimiTryOnCorrection()">Kimi 校正</button>
+                            <button class="btn btn-secondary" type="button" data-undo-correct onclick="undoTryOnCorrection()">撤销校正</button>
                             <button class="btn btn-secondary" type="button" onclick="resetPreviewGlassesControls()">重置</button>
                         </div>
                         <input type="file" id="face-photo-input" style="display: none;" accept="image/jpeg,image/png,image/jpg" onchange="previewFacePhoto(this)">
                         <div class="model-actions">
-                            <button class="btn btn-secondary" onclick="retakeFacePhoto()">重新拍摄</button>
-                            <button class="btn btn-primary" onclick="startFaceModeling()">手动补充参数</button>
-                            <button class="btn btn-secondary" onclick="recalibrateCurrentFace()">重新校准</button>
+                            <button class="btn btn-secondary capture-only" onclick="retakeFacePhoto()">重新拍摄</button>
+                            <button class="btn btn-primary capture-only" onclick="startFaceModeling()">手动补充参数</button>
+                            <button class="btn btn-secondary capture-only" onclick="recalibrateCurrentFace()">重新校准</button>
                         </div>
                         <div class="recognition-tips">
                             <span>正脸</span>
@@ -186,8 +197,8 @@
                         </div>
                         <div class="size-calibration-inline" aria-label="尺寸校准">
                             <div>
-                                <strong>尺寸不准时先校准</strong>
-                                <span>填验光单瞳距最有用；没有瞳距时再填脸宽。</span>
+                                <strong>尺寸校准</strong>
+                                <span>摄像头只给比例，真实毫米要用瞳距、脸宽或鼻梁宽做标定。</span>
                             </div>
                             <label>
                                 <span>瞳距 mm</span>
@@ -242,23 +253,25 @@
                                 </div>
                             </div>
                             <div class="camera-controls">
-                                <button class="btn btn-primary" onclick="startMediapipeCamera()">启动摄像机</button>
-                                <button class="btn btn-secondary" onclick="captureMediapipeModel()">单张生成</button>
-                                <button class="btn btn-secondary" onclick="exportTryOnSnapshot()">保存试戴图</button>
-                                <button class="btn btn-secondary" onclick="openTryOnSnapshot()">长按保存图</button>
-                                <button class="btn btn-primary" onclick="startActionCapture()">多角度采集</button>
-                                <button class="btn btn-secondary" onclick="stopMediapipeCamera()">停止</button>
-                                <button class="icon-toggle" type="button" onclick="toggleCameraFacing(this)" title="切换前后置摄像头">切换</button>
-                                <button class="icon-toggle active" type="button" onclick="toggleMediapipeMesh(this)" title="显示/隐藏人脸网格">网格</button>
-                                <button class="icon-toggle active" type="button" onclick="toggleMediapipeGlasses(this)" title="显示/隐藏眼镜">眼镜</button>
-                                <select id="mediapipe-glasses-style" onchange="setMediapipeGlasses(this.value)" aria-label="当前试戴镜框">
+                                <button class="btn btn-primary capture-control tryon-control" onclick="startMediapipeCamera()">启动摄像机</button>
+                                <button class="btn btn-secondary capture-control tryon-control" onclick="switchMediapipeCamera()">切换<span id="camera-facing-label">前置</span></button>
+                                <button class="btn btn-secondary tryon-control" onclick="captureMediapipeModel()">单张生成</button>
+                                <button class="btn btn-secondary tryon-control" onclick="exportTryOnSnapshot()">保存试戴图</button>
+                                <button class="btn btn-secondary tryon-control" onclick="openTryOnSnapshot()">长按保存图</button>
+                                <button class="btn btn-primary capture-control" onclick="startActionCapture()">多角度采集</button>
+                                <button class="btn btn-secondary capture-control" onclick="skipCurrentActionCaptureStep()">跳过当前动作</button>
+                                <button class="btn btn-secondary capture-control tryon-control" onclick="stopMediapipeCamera()">停止</button>
+                                <button class="icon-toggle capture-control tryon-control" type="button" onclick="toggleCameraFacing(this)" title="切换前后置摄像头">切换</button>
+                                <button class="icon-toggle active capture-control tryon-control" type="button" onclick="toggleMediapipeMesh(this)" title="显示/隐藏人脸网格">网格</button>
+                                <button class="icon-toggle active tryon-control" type="button" onclick="toggleMediapipeGlasses(this)" title="显示/隐藏眼镜">眼镜</button>
+                                <select class="tryon-control" id="mediapipe-glasses-style" onchange="setMediapipeGlasses(this.value)" aria-label="当前试戴镜框">
                                     <option value="">加载镜框中</option>
                                 </select>
-                                <button class="btn btn-secondary wishlist-inline-action" type="button" data-selected-wishlist-action onclick="addSelectedFrameToWishlist()">加入心愿单</button>
-                                <button class="btn btn-secondary wishlist-inline-action" type="button" data-selected-wishlist-remove onclick="removeSelectedFrameFromWishlist()">移出心愿单</button>
+                                <button class="btn btn-secondary wishlist-inline-action tryon-control" type="button" data-selected-wishlist-action onclick="addSelectedFrameToWishlist()">加入心愿单</button>
+                                <button class="btn btn-secondary wishlist-inline-action tryon-control" type="button" data-selected-wishlist-remove onclick="removeSelectedFrameFromWishlist()">移出心愿单</button>
                             </div>
                             <div class="camera-fit-controls" aria-label="实时试戴调节">
-                                <button class="btn btn-secondary" type="button" onclick="autoScaleSelectedGlasses()">自动缩放</button>
+                                <button class="btn btn-secondary" type="button" onclick="autoScaleSelectedGlasses()">自动调到适合大小</button>
                                 <label>
                                     <span>大小 <b id="camera-scale-value">100%</b></span>
                                     <input id="camera-glasses-scale" type="range" min="55" max="175" value="100" oninput="updatePreviewGlassesControl('scale', this.value)">
@@ -275,7 +288,8 @@
                                     <span>旋转 <b id="camera-rotation-value">0°</b></span>
                                     <input id="camera-glasses-rotation" type="range" min="-18" max="18" value="0" oninput="updatePreviewGlassesControl('rotation', this.value)">
                                 </label>
-                                <button class="btn btn-secondary" type="button" onclick="requestKimiTryOnCorrection()">Kimi 校正</button>
+                                <button class="btn btn-secondary" type="button" data-kimi-correct onclick="requestKimiTryOnCorrection()">Kimi 校正</button>
+                                <button class="btn btn-secondary" type="button" data-undo-correct onclick="undoTryOnCorrection()">撤销校正</button>
                                 <button class="btn btn-secondary" type="button" onclick="resetPreviewGlassesControls()">重置</button>
                             </div>
                             <div class="tryon-strip" id="tryon-strip" aria-label="可横向滑动选择镜框">
@@ -368,6 +382,7 @@
                                 <button class="btn btn-primary" data-export-action onclick="openGlassesReportImage()" disabled>长按保存</button>
                             </div>
                         </div>
+                        <p class="save-guide">保存方式：点“导出图片”会下载到设备；点“长按保存”会打开一张完整报告图，手机上长按图片即可保存。第 5 步也会保留这里的实拍试戴图。</p>
                         <div class="analysis-report" id="analysis-report">
                             <p class="text-dim">完成识别后，这里会生成尺寸、舒适度、风格和定制建议。</p>
                         </div>
@@ -398,8 +413,46 @@
                         </div>
                         <div class="wishlist-panel" id="wishlist-panel"></div>
                         <div class="onboard-final-actions">
+                            <button class="btn btn-primary" type="button" onclick="finishOnboardFlow()">完成并回首页</button>
                             <a class="btn btn-primary carry-user-link" href="./chat.html">和商家/铮铮沟通</a>
                             <a class="btn btn-secondary carry-user-link" href="./index.html">回首页看数据</a>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-card customer-section active customization-card">
+                        <div class="card-heading">
+                            <div>
+                                <p class="eyebrow">定制镜框</p>
+                                <h3>先锁定尺寸依据，再把需求发给商家。</h3>
+                            </div>
+                            <button class="btn btn-secondary" type="button" onclick="fillCustomizationFromAnalysis(true)">自动填入推荐参数</button>
+                        </div>
+                        <div class="customization-layout">
+                            <div class="customization-form">
+                                <div class="customization-confidence" id="customization-confidence"></div>
+                                <div class="custom-grid">
+                                    <label><span>镜圈宽度 mm</span><input id="custom-lens-width" type="number" min="42" max="60" placeholder="如 50" oninput="saveCustomizationData(false)"></label>
+                                    <label><span>鼻梁宽 mm</span><input id="custom-bridge-width" type="number" min="12" max="26" placeholder="如 18" oninput="saveCustomizationData(false)"></label>
+                                    <label><span>镜框总宽 mm</span><input id="custom-frame-total-width" type="number" min="100" max="150" placeholder="如 118" oninput="saveCustomizationData(false)"></label>
+                                    <label><span>镜圈高度 mm</span><input id="custom-lens-height" type="number" min="28" max="55" placeholder="如 40" oninput="saveCustomizationData(false)"></label>
+                                    <label><span>镜腿长度 mm</span><input id="custom-temple-length" type="number" min="135" max="155" placeholder="如 145" oninput="saveCustomizationData(false)"></label>
+                                    <label><span>鼻托方案</span><select id="custom-nose-pad" onchange="saveCustomizationData(false)"><option value="standard">标准鼻托</option><option value="adjustable">可调鼻托</option><option value="high">加高鼻托</option><option value="anti-slip">防滑鼻托</option></select></label>
+                                    <label><span>材料</span><select id="custom-material" onchange="saveCustomizationData(false)"><option value="mixed">待商家建议</option><option value="metal">金属</option><option value="titanium">钛/β钛</option><option value="acetate">板材</option><option value="tr90">TR90</option></select></label>
+                                    <label><span>铰链/镜腿</span><select id="custom-hinge" onchange="saveCustomizationData(false)"><option value="standard">标准铰链</option><option value="spring">弹簧铰链</option><option value="wide">宽镜腿防夹头</option><option value="soft-tip">软脚套防滑</option></select></label>
+                                </div>
+                                <p class="custom-note">镜圈宽度指单个镜圈内侧两边的距离；镜框总宽约为“镜圈宽度 × 2 + 鼻梁宽”。定制前仍需补充医院或门店验光单。</p>
+                                <div class="custom-actions">
+                                    <button class="btn btn-primary" type="button" onclick="saveCustomizationData(true)">保存定制参数</button>
+                                    <button class="btn btn-secondary" type="button" onclick="sendCustomizationToChat()">带着参数去聊天</button>
+                                </div>
+                            </div>
+                            <div class="frame-3d-card">
+                                <div id="frame-3d-api-preview" class="frame-3d-api-preview" aria-label="镜框 3D API 预览">
+                                    <strong>等待 3D API</strong>
+                                    <span>这里不会再用 SVG 或 canvas 假 3D；接入真实 3D API 后显示模型。</span>
+                                </div>
+                                <div class="frame-3d-meta" id="frame-3d-meta"></div>
+                            </div>
                         </div>
                     </div>
 
@@ -413,9 +466,10 @@
             </section>
 
             <div class="onboard-step-nav" aria-label="引导操作">
-                <button class="btn btn-secondary" type="button" onclick="setOnboardStep(-1)">上一步</button>
-                <span id="onboard-step-label">第 1 步 / 共 4 步</span>
-                <button class="btn btn-primary" type="button" onclick="setOnboardStep(1)">下一步</button>
+                <button class="btn btn-secondary" id="onboard-prev-button" type="button" onclick="setOnboardStep(-1)">上一步</button>
+                <span id="onboard-step-label">第 1 步 / 共 5 步</span>
+                <button class="btn btn-secondary" id="onboard-save-button" type="button" onclick="saveOnboardStepProgress(true)">保存本步</button>
+                <button class="btn btn-primary" id="onboard-next-button" type="button" onclick="handleOnboardNext()">下一步</button>
             </div>
 
             <section class="modeling-system-section" id="modeling-system">
@@ -572,6 +626,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=20260520-tryonfix1"></script>
+    <script src="app.js?v=20260621-actionfix1"></script>
 </body>
 </html>

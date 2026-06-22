@@ -14,6 +14,170 @@
     --shadow: 0 18px 45px rgba(16, 32, 42, 0.12);
 }
 
+/* Short, product-like onboarding flow: each step only shows its own job. */
+.onboard-page .hero-section {
+    min-height: auto;
+    padding-block: clamp(18px, 4vw, 38px);
+}
+
+.onboard-page .hero-copy h1 {
+    max-width: 820px;
+}
+
+.onboard-page .hero-visual,
+.onboard-page .trust-row,
+.onboard-page .modeling-system-section,
+.onboard-page .workflow-section,
+.onboard-page .features-section,
+.onboard-page .faq-section {
+    display: none;
+}
+
+.onboard-page .dashboard-heading {
+    margin-bottom: 14px;
+}
+
+.onboard-page .dashboard-workspace {
+    align-items: start;
+}
+
+.onboard-page .tryon-panel,
+.onboard-page .analysis-card,
+.onboard-page .preference-card,
+.onboard-page .recommendations-card,
+.onboard-page .analysis-report-card {
+    min-height: 0;
+}
+
+.onboard-page[data-onboard-step="1"] .user-dashboard,
+.onboard-page[data-onboard-step="2"] .analysis-card,
+.onboard-page[data-onboard-step="2"] .preference-card,
+.onboard-page[data-onboard-step="2"] .recommendations-card,
+.onboard-page[data-onboard-step="2"] .tryon-adjust-panel,
+.onboard-page[data-onboard-step="2"] .size-calibration-inline,
+.onboard-page[data-onboard-step="2"] .tryon-control,
+.onboard-page[data-onboard-step="2"] .camera-fit-controls,
+.onboard-page[data-onboard-step="2"] .tryon-strip,
+.onboard-page[data-onboard-step="2"] .preference-card,
+.onboard-page[data-onboard-step="2"] .recommendations-card {
+    display: none !important;
+}
+
+.onboard-page[data-onboard-step="3"] .capture-only,
+.onboard-page[data-onboard-step="3"] .recognition-tips,
+.onboard-page[data-onboard-step="3"] .size-calibration-inline,
+.onboard-page[data-onboard-step="3"] .action-capture-panel,
+.onboard-page[data-onboard-step="3"] .analysis-card,
+.onboard-page[data-onboard-step="3"] .capture-control:not(.tryon-control) {
+    display: none !important;
+}
+
+.onboard-page[data-onboard-step="3"] .camera-action-guide small::after {
+    content: " 可横向滑动下方镜框列表，切换后会立即叠加到摄像头画面。";
+}
+
+.onboard-page[data-onboard-step="4"] .dashboard-workspace {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.onboard-page[data-onboard-step="4"] .analysis-card,
+.onboard-page[data-onboard-step="4"] .recommendations-card,
+.onboard-page[data-onboard-step="4"] .analysis-report-card {
+    width: min(100%, 980px);
+    margin-inline: auto;
+}
+
+.onboard-step-nav {
+    position: sticky;
+    bottom: 12px;
+    z-index: 28;
+    width: min(100% - 28px, 980px);
+    margin: 18px auto 0;
+    display: grid;
+    grid-template-columns: minmax(110px, 1fr) auto minmax(110px, 1fr) minmax(110px, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid rgba(41, 103, 94, 0.14);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 12px 32px rgba(25, 41, 48, 0.08);
+    backdrop-filter: blur(14px);
+}
+
+.onboard-step-nav span {
+    color: var(--muted);
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.chat-image-button {
+    min-width: 72px;
+}
+
+.chat-image-thumb {
+    display: block;
+    margin-top: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: zoom-in;
+}
+
+.chat-image-thumb img {
+    display: block;
+    max-width: min(260px, 62vw);
+    max-height: 220px;
+    border-radius: 8px;
+    object-fit: contain;
+    background: #f4f7f6;
+    border: 1px solid rgba(41, 103, 94, 0.12);
+}
+
+.chat-image-viewer {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: none;
+    place-items: center;
+    padding: 20px;
+    background: rgba(8, 19, 24, 0.72);
+}
+
+.chat-image-viewer.active {
+    display: grid;
+}
+
+.chat-image-viewer-dialog {
+    position: relative;
+    width: min(92vw, 920px);
+    max-height: 90svh;
+    padding: 16px;
+    border-radius: 10px;
+    background: #fff;
+}
+
+.chat-image-viewer-dialog button {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 38px;
+    height: 38px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(8, 19, 24, 0.82);
+    color: #fff;
+    font-size: 1.4rem;
+    cursor: pointer;
+}
+
+.chat-image-viewer-dialog img {
+    display: block;
+    width: 100%;
+    max-height: calc(90svh - 32px);
+    object-fit: contain;
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -758,6 +922,13 @@ textarea {
     color: var(--muted);
 }
 
+.ppt-reference-card .muted-note {
+    margin-top: 12px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: #7d8b90;
+}
+
 .ppt-file-actions {
     display: flex;
     gap: 10px;
@@ -857,6 +1028,21 @@ textarea {
 }
 
 #chat-sync-state.online {
+    color: var(--primary-dark);
+    background: #e9f8f5;
+}
+
+.chat-sync-pill {
+    padding: 5px 8px;
+    border-radius: 8px;
+    color: var(--muted);
+    background: #f1f5f6;
+    font-size: 0.76rem;
+    font-weight: 850;
+    white-space: nowrap;
+}
+
+.chat-sync-pill.online {
     color: var(--primary-dark);
     background: #e9f8f5;
 }
@@ -1322,6 +1508,73 @@ textarea {
     border: 1px solid var(--line);
     border-radius: 8px;
     background: #f8fbfb;
+}
+
+.merchant-summary-head {
+    margin-bottom: 12px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.merchant-summary-head h2 {
+    margin: 2px 0 0;
+    font-size: 1.18rem;
+}
+
+.merchant-summary-head > span {
+    padding: 5px 9px;
+    border-radius: 8px;
+    color: var(--primary-dark);
+    background: #eaf8f4;
+    font-size: 0.78rem;
+    font-weight: 850;
+    white-space: nowrap;
+}
+
+.merchant-summary-frame {
+    width: min(220px, 100%);
+    max-height: 120px;
+    margin-top: 12px;
+    object-fit: contain;
+    display: block;
+    border-radius: 8px;
+    background: #f5f8f8;
+}
+
+.merchant-quick-replies {
+    margin-top: 10px;
+}
+
+.merchant-action-strip {
+    width: min(100%, 1180px);
+    margin: 0 auto 18px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.merchant-action-strip article {
+    padding: 16px;
+    display: grid;
+    gap: 10px;
+    border: 1px solid rgba(15, 118, 110, 0.13);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 10px 28px rgba(16, 32, 42, 0.06);
+}
+
+.merchant-action-strip span {
+    color: var(--primary);
+    font-size: 0.82rem;
+    font-weight: 900;
+}
+
+.merchant-action-strip strong {
+    min-height: 48px;
+    color: var(--ink);
+    line-height: 1.45;
 }
 
 .customer-page .site-header {
@@ -1903,6 +2156,17 @@ textarea {
     font-weight: 750;
 }
 
+.home-temp-user-form {
+    padding: 6px;
+    grid-template-columns: minmax(110px, 1fr) auto;
+    align-items: center;
+    background: #fff;
+}
+
+.home-temp-user-form > div {
+    display: contents;
+}
+
 .audience-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2449,8 +2713,18 @@ textarea {
 .mediapipe-camera-panel {
     margin-top: 16px;
     padding-top: 16px;
+    display: flex;
+    flex-direction: column;
     border-top: 1px solid var(--line);
 }
+
+.camera-toolbar { order: 1; }
+.camera-stage { order: 2; }
+.camera-action-guide { order: 3; }
+.action-capture-panel { order: 4; }
+.tryon-strip { order: 5; }
+.camera-controls { order: 6; }
+.camera-fit-controls { order: 7; }
 
 .camera-toolbar {
     display: flex;
@@ -2458,11 +2732,18 @@ textarea {
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 12px;
+    min-width: 0;
+}
+
+.camera-toolbar > * {
+    flex-shrink: 0;
 }
 
 .camera-toolbar h4 {
     margin: 4px 0 0;
     font-size: 1rem;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .camera-toolbar > span {
@@ -2501,11 +2782,13 @@ textarea {
     object-fit: cover;
     object-position: center center;
     transform: scaleX(-1);
+    z-index: 1;
 }
 
 .camera-stage canvas {
     object-fit: cover;
     object-position: center center;
+    z-index: 2;
     pointer-events: none;
     transform: scaleX(-1);
 }
@@ -2535,10 +2818,9 @@ textarea {
 .onboard-page[data-onboard-step="2"] .recognition-tips,
 .onboard-page[data-onboard-step="2"] .three-d-preview,
 .onboard-page[data-onboard-step="2"] .face-result-data,
-.onboard-page[data-onboard-step="2"] .camera-controls select,
-.onboard-page[data-onboard-step="2"] .camera-controls .btn:nth-of-type(2),
-.onboard-page[data-onboard-step="2"] .camera-controls .btn:nth-of-type(3),
-.onboard-page[data-onboard-step="2"] .camera-controls .btn:nth-of-type(4) {
+.onboard-page[data-onboard-step="2"] .preference-card,
+.onboard-page[data-onboard-step="2"] .recommendations-card,
+.onboard-page[data-onboard-step="2"] .camera-controls select {
     display: none;
 }
 
@@ -2546,10 +2828,23 @@ textarea {
     aspect-ratio: 16 / 10;
 }
 
-.onboard-page[data-onboard-step="3"] .camera-action-guide,
-.onboard-page[data-onboard-step="3"] .action-capture-panel {
-    display: none;
+.onboard-page[data-onboard-step="2"] .tryon-panel,
+.onboard-page[data-onboard-step="3"] .tryon-panel {
+    width: min(100%, 980px);
+    margin-inline: auto;
 }
+
+.onboard-page[data-onboard-step="2"] .mediapipe-camera-panel,
+.onboard-page[data-onboard-step="3"] .mediapipe-camera-panel {
+    border-top: 0;
+    padding-top: 0;
+}
+
+.onboard-page[data-onboard-step="3"] .camera-action-guide {
+    display: grid !important;
+}
+
+
 
 .chat-tools {
     display: grid;
@@ -2646,6 +2941,18 @@ textarea {
     display: none;
 }
 
+.mediapipe-camera-panel.camera-ready .camera-empty {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.mediapipe-camera-panel.camera-opening .camera-empty {
+    bottom: 50%;
+    transform: translate(-50%, 50%);
+    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(16, 32, 42, 0.86);
+}
+
 .camera-action-guide {
     margin-top: 10px;
     padding: 10px 12px;
@@ -2695,11 +3002,21 @@ textarea {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    min-width: 0;
+}
+
+.action-capture-head > * {
+    flex-shrink: 0;
 }
 
 .action-capture-head strong {
     color: var(--ink);
     font-size: 0.95rem;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .action-metrics {
@@ -2754,15 +3071,20 @@ textarea {
 
 .camera-controls {
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr)) repeat(2, auto) minmax(160px, 1.1fr) repeat(2, minmax(120px, 0.72fr));
+    grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
     gap: 10px;
     margin-top: 12px;
+    min-width: 0;
 }
 
 .camera-controls .btn,
 .camera-controls select,
 .icon-toggle {
     min-height: 42px;
+}
+
+.camera-controls select {
+    min-width: 180px;
 }
 
 .camera-controls select,
@@ -3942,6 +4264,218 @@ footer a {
     font-weight: 750;
 }
 
+.save-image-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: none;
+    place-items: center;
+    padding: 18px;
+    background: rgba(12, 28, 34, 0.52);
+    backdrop-filter: blur(10px);
+}
+
+.save-image-modal.active {
+    display: grid;
+}
+
+body.save-modal-open {
+    overflow: hidden;
+}
+
+.save-image-dialog {
+    width: min(980px, 100%);
+    max-height: min(92svh, 900px);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: var(--shadow-xl);
+}
+
+.save-image-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.save-image-head h2 {
+    margin: 2px 0 4px;
+    font-size: clamp(1.25rem, 2vw, 1.8rem);
+}
+
+.save-image-head p:not(.eyebrow) {
+    margin: 0;
+    color: var(--muted);
+}
+
+.save-image-stage {
+    min-height: 0;
+    overflow: auto;
+    padding: 16px;
+    background: #eef5f3;
+    text-align: center;
+    -webkit-overflow-scrolling: touch;
+}
+
+.save-image-stage-inner {
+    min-height: 240px;
+    display: grid;
+    place-items: center;
+}
+
+.save-image-stage img {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto;
+    border-radius: 8px;
+    background: #ffffff;
+    user-select: auto;
+    -webkit-user-select: auto;
+    -webkit-touch-callout: default;
+}
+
+.save-image-loading {
+    display: grid;
+    place-items: center;
+    gap: 8px;
+    min-height: 260px;
+    color: var(--ink);
+}
+
+.save-image-loading span {
+    width: 42px;
+    height: 42px;
+    border: 4px solid rgba(47, 127, 113, 0.18);
+    border-top-color: var(--primary);
+    border-radius: 999px;
+    animation: save-spin 0.9s linear infinite;
+}
+
+.save-image-loading strong {
+    font-size: 1.05rem;
+}
+
+.save-image-loading p {
+    margin: 0;
+    color: var(--muted);
+}
+
+@keyframes save-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.save-image-actions {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+    padding: 14px 20px 18px;
+    border-top: 1px solid var(--border);
+    background: #ffffff;
+}
+
+.save-image-actions .btn {
+    width: 100%;
+    min-width: 0;
+    text-align: center;
+    text-decoration: none;
+}
+
+.save-image-actions [aria-disabled="true"],
+.save-image-actions .btn:disabled {
+    pointer-events: none;
+    opacity: 0.52;
+}
+
+.save-page {
+    min-height: 100svh;
+    background: linear-gradient(120deg, #e8f3f0 0%, #f6f3f2 100%);
+}
+
+.save-page-shell {
+    width: min(1080px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0;
+}
+
+.save-page-card {
+    display: grid;
+    gap: 18px;
+    padding: 22px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: var(--shadow-lg);
+}
+
+.save-page-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.save-page-head h1 {
+    margin: 2px 0 6px;
+    font-size: clamp(1.6rem, 4vw, 2.5rem);
+}
+
+.save-page-head p:not(.eyebrow) {
+    margin: 0;
+    color: var(--muted);
+}
+
+.save-page-stage {
+    min-height: 280px;
+    overflow: auto;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #eef5f3;
+    text-align: center;
+    -webkit-overflow-scrolling: touch;
+}
+
+.save-page-stage img {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto;
+    border-radius: 8px;
+    background: #ffffff;
+    user-select: auto;
+    -webkit-user-select: auto;
+    -webkit-touch-callout: default;
+}
+
+.save-page-empty {
+    margin: 120px auto;
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.save-page-actions {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.save-page-actions .btn {
+    width: 100%;
+    min-width: 0;
+    text-align: center;
+    text-decoration: none;
+}
+
 @media (max-width: 1180px) {
     .dashboard-workspace::before {
         display: none;
@@ -4238,23 +4772,23 @@ footer a {
 
     .camera-action-guide {
         flex-shrink: 0;
-        margin: 6px 10px 0;
-        padding: 8px 10px;
+        margin: 4px 10px 0;
+        padding: 6px 10px;
         gap: 2px;
     }
 
     .camera-action-guide strong {
-        font-size: 0.9rem;
+        font-size: 0.85rem;
     }
 
     .camera-action-guide small {
-        font-size: 0.72rem;
+        font-size: 0.7rem;
     }
 
     .action-capture-panel {
         flex-shrink: 0;
-        margin: 6px 10px 0;
-        padding: 8px 10px;
+        margin: 4px 10px 0;
+        padding: 6px 10px;
     }
 
     .action-capture-head {
@@ -4292,8 +4826,8 @@ footer a {
         display: flex;
         flex-wrap: nowrap;
         gap: 6px;
-        margin: 6px 10px 0;
-        padding: 6px 0;
+        margin: 4px 10px 0;
+        padding: 4px 0;
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
         scrollbar-width: none;
@@ -4386,6 +4920,12 @@ footer a {
 
     .header-top .user-section > span {
         grid-column: 1 / -1;
+    }
+
+    .header-top .home-temp-user-form {
+        grid-column: 1 / -1;
+        grid-template-columns: minmax(0, 1fr) auto;
+        width: 100%;
     }
 
     .user-section .btn,
@@ -4605,18 +5145,43 @@ footer a {
     }
 
     .camera-toolbar {
-        align-items: stretch;
-        flex-direction: column;
+        align-items: center;
+        flex-direction: row;
+        margin-bottom: 8px;
+    }
+
+    .camera-toolbar h4 {
+        font-size: 0.92rem;
+        line-height: 1.35;
+    }
+
+    .camera-toolbar .eyebrow {
+        margin-bottom: 2px;
+        font-size: 0.72rem;
+    }
+
+    .camera-toolbar > span {
+        flex: 0 0 auto;
+        padding: 5px 8px;
+        white-space: nowrap;
     }
 
     .camera-stage {
         width: 100%;
         height: auto;
-        aspect-ratio: 4 / 5;
-        max-height: 68vh;
-        max-height: 68svh;
+        flex: none;
+        min-height: 0;
+        aspect-ratio: 3 / 4;
+        max-height: 58vh;
+        max-height: 58svh;
         margin-left: 0;
         margin-right: 0;
+    }
+
+    .onboard-page[data-onboard-step="2"] .camera-stage {
+        aspect-ratio: 3 / 4;
+        flex: none;
+        min-height: 0;
     }
 
     .camera-action-guide {
@@ -4669,14 +5234,19 @@ footer a {
     }
 
     .camera-fit-controls {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        padding: 10px;
+    }
+
+    .camera-fit-controls .btn {
+        min-height: 38px;
     }
 
     .tryon-strip {
-        width: calc(100% + 8px);
-        margin-left: -4px;
-        margin-right: -4px;
-        padding: 10px;
+        width: calc(100% + 12px);
+        margin: 10px -6px 0;
+        padding: 9px;
+        background: rgba(248, 251, 251, 0.98);
     }
 
     .tryon-strip-head {
@@ -4686,7 +5256,34 @@ footer a {
     }
 
     .tryon-strip-track {
-        grid-auto-columns: minmax(80px, 22vw);
+        grid-auto-columns: minmax(104px, 34vw);
+        gap: 8px;
+    }
+
+    .tryon-pill {
+        min-height: 128px;
+        padding: 7px;
+    }
+
+    .tryon-pill-main {
+        grid-template-rows: 56px auto;
+    }
+
+    .tryon-pill-main > span:last-child {
+        font-size: 0.72rem;
+    }
+
+    .tryon-pill-wish,
+    .tryon-pill-view {
+        min-height: 26px;
+        font-size: 0.68rem;
+    }
+
+    .onboard-page[data-onboard-step="3"] .tryon-strip {
+        position: sticky;
+        top: 6px;
+        z-index: 5;
+        box-shadow: 0 10px 24px rgba(16, 32, 42, 0.08);
     }
 
     .rec-actions {
@@ -4708,5 +5305,1625 @@ footer a {
 
     .frame-viewer-actions .btn {
         flex: 1;
+    }
+}
+
+/* Final device layout pass: keep camera, frame choice and data reachable on every screen. */
+:root[data-camera-facing="environment"] .camera-stage video,
+:root[data-camera-facing="environment"] .camera-stage canvas {
+    transform: none;
+}
+
+@media (min-width: 1181px) {
+    .dashboard-workspace {
+        max-width: 1220px;
+        grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.78fr);
+        grid-template-areas:
+            "model analysis"
+            "model prefs"
+            "recommendations report";
+        gap: 20px;
+    }
+
+    .onboard-page[data-onboard-step="2"] .dashboard-workspace,
+    .onboard-page[data-onboard-step="3"] .dashboard-workspace,
+    .customer-page .dashboard-workspace {
+        grid-template-columns: minmax(0, 1.6fr) minmax(340px, 0.72fr);
+        grid-template-areas:
+            "model analysis"
+            "model prefs"
+            "recommendations report";
+    }
+
+    .mediapipe-camera-panel {
+        gap: 14px;
+    }
+
+    .camera-stage {
+        aspect-ratio: 16 / 9;
+        max-height: min(650px, 72svh);
+    }
+
+    .tryon-strip-track {
+        grid-auto-columns: 150px;
+    }
+
+    .analysis-card,
+    .preference-card,
+    .analysis-report-card {
+        position: sticky;
+        top: 18px;
+    }
+}
+
+@media (min-width: 641px) and (max-width: 1180px) {
+    html,
+    body {
+        overflow-x: hidden;
+    }
+
+    .glasses-container,
+    .auth-shell,
+    .onboard-page,
+    .customer-page,
+    .merchant-page,
+    .chat-page {
+        width: 100%;
+    }
+
+    .app-nav {
+        width: calc(100% - 28px);
+        margin: 14px auto 0;
+        border-radius: 8px;
+    }
+
+    .dashboard-workspace {
+        width: calc(100% - 32px);
+        max-width: 920px;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+            "model"
+            "analysis"
+            "prefs"
+            "recommendations"
+            "report";
+        gap: 16px;
+    }
+
+    .onboard-page .onboard-shell,
+    .customer-page .customer-shell {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .onboard-page .onboard-flow {
+        width: calc(100% - 32px);
+        max-width: 920px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .mediapipe-camera-panel {
+        gap: 12px;
+        padding: 14px;
+    }
+
+    .camera-stage {
+        aspect-ratio: 16 / 10;
+        max-height: min(600px, 64svh);
+        min-height: 360px;
+    }
+
+    .camera-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .camera-controls .btn,
+    .camera-controls .icon-toggle,
+    .camera-controls select {
+        flex: 1 1 140px;
+        min-width: 0;
+    }
+
+    .camera-fit-controls {
+        grid-template-columns: auto repeat(3, minmax(130px, 1fr)) auto;
+    }
+
+    .tryon-strip-track {
+        grid-auto-columns: minmax(132px, 18vw);
+    }
+
+    .analysis-grid,
+    .preference-grid,
+    .report-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    html,
+    body {
+        height: auto !important;
+        min-height: 100%;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+    }
+
+    body {
+        background: #edf5f3;
+    }
+
+    main,
+    .glasses-container,
+    .auth-shell,
+    .onboard-page,
+    .customer-page,
+    .merchant-page,
+    .chat-page {
+        width: 100% !important;
+        min-height: 100svh;
+        overflow: visible !important;
+    }
+
+    .hero-section,
+    .index-hero,
+    .site-hero {
+        min-height: auto;
+    }
+
+    .app-nav {
+        position: sticky;
+        top: 0;
+        z-index: 40;
+        width: 100%;
+        margin: 0;
+        padding: 8px 10px;
+        border-radius: 0;
+        border-left: 0;
+        border-right: 0;
+        box-shadow: 0 8px 22px rgba(16, 32, 42, 0.08);
+    }
+
+    .app-nav .brand,
+    .app-nav-brand,
+    .nav-brand {
+        min-width: 0;
+    }
+
+    .app-nav h1,
+    .app-nav .brand-name,
+    .nav-brand strong {
+        font-size: 1rem;
+        white-space: nowrap;
+    }
+
+    .app-nav-links,
+    .nav-links {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .app-nav-links::-webkit-scrollbar,
+    .nav-links::-webkit-scrollbar {
+        display: none;
+    }
+
+    .app-nav-links a,
+    .app-nav-links button,
+    .nav-links a,
+    .nav-links button {
+        flex: 0 0 auto;
+        min-height: 34px;
+        padding: 7px 10px;
+        font-size: 0.78rem;
+    }
+
+    .onboard-page .onboard-shell,
+    .customer-page .customer-shell,
+    .merchant-shell,
+    .chat-shell {
+        width: 100%;
+        padding: 10px;
+    }
+
+    .onboard-page .onboard-flow {
+        display: flex !important;
+        width: calc(100% - 20px);
+        margin: 10px auto;
+        padding: 8px;
+        gap: 8px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 8px;
+    }
+
+    .onboard-step {
+        flex: 0 0 auto;
+        min-width: 86px;
+        padding: 8px 10px;
+        font-size: 0.72rem;
+    }
+
+    .dashboard-workspace {
+        width: 100% !important;
+        max-width: none;
+        margin: 0;
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) !important;
+        grid-template-areas:
+            "model"
+            "analysis"
+            "prefs"
+            "recommendations"
+            "report" !important;
+        gap: 10px;
+    }
+
+    .dashboard-card,
+    .modeling-card,
+    .onboard-card,
+    .analysis-card,
+    .preference-card,
+    .recommendations-card,
+    .analysis-report-card,
+    .tryon-panel {
+        display: block !important;
+        width: 100%;
+        border-radius: 8px;
+        box-shadow: none;
+    }
+
+    .analysis-card,
+    .preference-card,
+    .recommendations-card,
+    .analysis-report-card {
+        position: static !important;
+        padding: 12px;
+    }
+
+    .mediapipe-camera-panel {
+        display: flex !important;
+        flex-direction: column;
+        gap: 10px;
+        padding: 10px;
+        border-radius: 8px;
+    }
+
+    .camera-toolbar {
+        order: 1;
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .camera-stage {
+        order: 2;
+        width: 100%;
+        min-height: 0 !important;
+        aspect-ratio: 3 / 4;
+        max-height: min(560px, 60svh) !important;
+        border-radius: 8px;
+    }
+
+    .onboard-page[data-onboard-step="2"] .camera-stage {
+        aspect-ratio: 3 / 4;
+        max-height: min(540px, 58svh) !important;
+    }
+
+    .camera-action-guide {
+        order: 3;
+        padding: 10px;
+        border-radius: 8px;
+    }
+
+    .action-capture-panel {
+        order: 4;
+    }
+
+    .tryon-strip {
+        order: 5;
+        width: 100%;
+        margin: 0;
+        padding: 8px;
+        border-radius: 8px;
+        background: #f9fcfb;
+        position: static !important;
+    }
+
+    .onboard-page[data-onboard-step="2"] .tryon-strip {
+        display: none !important;
+    }
+
+    .tryon-strip-head {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .tryon-strip-track {
+        grid-auto-columns: minmax(108px, 38vw);
+        gap: 8px;
+        padding-bottom: 2px;
+    }
+
+    .tryon-pill {
+        min-height: 134px;
+        padding: 7px;
+    }
+
+    .tryon-pill-main {
+        grid-template-rows: 58px auto;
+    }
+
+    .camera-controls {
+        order: 6;
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        overflow: visible;
+    }
+
+    .camera-controls .btn,
+    .camera-controls .icon-toggle,
+    .camera-controls select {
+        width: 100%;
+        min-width: 0;
+        min-height: 42px;
+        padding: 8px 10px;
+        font-size: 0.82rem;
+    }
+
+    .camera-controls select {
+        grid-column: 1 / -1;
+    }
+
+    .camera-fit-controls {
+        order: 7;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding: 10px;
+    }
+
+    .action-capture-head {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    .action-capture-steps {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .recognition-metrics,
+    .analysis-grid,
+    .preference-grid,
+    .report-grid,
+    .recommendation-grid,
+    .profile-summary-grid {
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
+
+    .recommendation-card,
+    .frame-card {
+        min-height: auto;
+    }
+
+    .onboard-actions,
+    .form-actions,
+    .wizard-actions {
+        position: sticky;
+        bottom: 0;
+        z-index: 30;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin: 10px -10px -10px;
+        padding: 10px;
+        background: rgba(237, 245, 243, 0.96);
+        border-top: 1px solid rgba(41, 103, 94, 0.15);
+        backdrop-filter: blur(10px);
+    }
+
+    .onboard-actions .btn,
+    .form-actions .btn,
+    .wizard-actions .btn {
+        min-height: 42px;
+    }
+
+    .frame-viewer-dialog {
+        width: min(100% - 16px, 480px);
+        max-height: calc(100svh - 24px);
+        grid-template-rows: minmax(220px, 1fr) auto;
+        border-radius: 8px;
+    }
+
+    .frame-viewer-image {
+        min-height: 220px;
+    }
+
+    .ppt-preview-page,
+    .ppt-stage,
+    .ppt-slide-frame {
+        width: 100%;
+        overflow-x: hidden;
+    }
+}
+
+/* Final short-flow overrides. Kept at the end so mobile !important display rules cannot reopen hidden steps. */
+.onboard-page .hero-section {
+    min-height: auto !important;
+    padding-block: clamp(18px, 4vw, 38px) !important;
+}
+
+.onboard-page .hero-visual,
+.onboard-page .trust-row,
+.onboard-page .modeling-system-section,
+.onboard-page .workflow-section,
+.onboard-page .features-section,
+.onboard-page .faq-section {
+    display: none !important;
+}
+
+.onboard-page[data-onboard-step="1"] .user-dashboard,
+.onboard-page[data-onboard-step="2"] .analysis-card,
+.onboard-page[data-onboard-step="2"] .preference-card,
+.onboard-page[data-onboard-step="2"] .recommendations-card,
+.onboard-page[data-onboard-step="2"] .analysis-report-card,
+.onboard-page[data-onboard-step="3"] .analysis-card,
+.onboard-page[data-onboard-step="3"] .action-capture-panel,
+.onboard-page[data-onboard-step="3"] .recognition-tips,
+.onboard-page[data-onboard-step="4"] .tryon-panel,
+.onboard-page[data-onboard-step="4"] .preference-card {
+    display: none !important;
+}
+
+.onboard-page[data-onboard-step="2"] .tryon-adjust-panel,
+.onboard-page[data-onboard-step="2"] .size-calibration-inline,
+.onboard-page[data-onboard-step="2"] .tryon-control,
+.onboard-page[data-onboard-step="2"] .camera-fit-controls,
+.onboard-page[data-onboard-step="2"] .tryon-strip,
+.onboard-page[data-onboard-step="2"] .preference-card,
+.onboard-page[data-onboard-step="2"] .recommendations-card {
+    display: none !important;
+}
+
+.onboard-page[data-onboard-step="3"] .capture-only,
+.onboard-page[data-onboard-step="3"] .recognition-tips,
+.onboard-page[data-onboard-step="3"] .size-calibration-inline,
+.onboard-page[data-onboard-step="3"] .action-capture-panel,
+.onboard-page[data-onboard-step="3"] .analysis-card,
+.onboard-page[data-onboard-step="3"] .capture-control:not(.tryon-control) {
+    display: none !important;
+}
+
+.onboard-page[data-onboard-step="4"] .analysis-card,
+.onboard-page[data-onboard-step="4"] .recommendations-card,
+.onboard-page[data-onboard-step="4"] .analysis-report-card {
+    width: min(100%, 980px) !important;
+    margin-inline: auto !important;
+}
+
+.customization-card {
+    display: none;
+}
+
+.onboard-page[data-onboard-step="2"] .size-calibration-inline {
+    display: grid !important;
+    order: 3 !important;
+    background: #f7fcfa;
+    border-color: rgba(15, 118, 110, 0.24);
+}
+
+.onboard-page[data-onboard-step="2"] .recognition-tips {
+    display: flex !important;
+}
+
+.onboard-page[data-onboard-step="2"] .camera-controls .capture-control {
+    display: inline-flex !important;
+}
+
+.onboard-page[data-onboard-step="2"] .camera-controls .icon-toggle[title*="网格"] {
+    display: inline-flex !important;
+}
+
+.onboard-page[data-onboard-step="2"] .camera-empty {
+    bottom: 14px;
+    width: min(420px, calc(100% - 24px));
+    padding: 10px 12px;
+}
+
+.onboard-page[data-onboard-step="5"] .tryon-panel,
+.onboard-page[data-onboard-step="5"] .analysis-card,
+.onboard-page[data-onboard-step="5"] .preference-card,
+.onboard-page[data-onboard-step="5"] .recommendations-card {
+    display: none !important;
+}
+
+.onboard-page[data-onboard-step="5"] .dashboard-workspace {
+    grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.onboard-page[data-onboard-step="5"] .customization-card {
+    display: block !important;
+    width: min(100%, 980px) !important;
+    margin-inline: auto !important;
+}
+
+.onboard-page[data-onboard-step="5"] .analysis-report-card {
+    display: block !important;
+    width: min(100%, 980px) !important;
+    margin-inline: auto !important;
+}
+
+.customization-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+    gap: 18px;
+    align-items: start;
+}
+
+.customization-form,
+.frame-3d-card {
+    border: 1px solid rgba(15, 118, 110, 0.14);
+    border-radius: 8px;
+    background: #fff;
+    padding: 16px;
+}
+
+.customization-confidence {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.customization-confidence div {
+    border: 1px solid rgba(15, 118, 110, 0.12);
+    border-radius: 8px;
+    background: #eef8f5;
+    padding: 10px;
+}
+
+.customization-confidence span {
+    display: block;
+    color: var(--muted);
+    font-size: 0.84rem;
+    font-weight: 800;
+}
+
+.customization-confidence strong {
+    display: block;
+    margin-top: 4px;
+    color: var(--primary-dark);
+}
+
+.customization-confidence p {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--muted);
+}
+
+.custom-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.custom-grid label {
+    display: grid;
+    gap: 6px;
+    color: var(--muted);
+    font-weight: 800;
+}
+
+.custom-grid input,
+.custom-grid select {
+    width: 100%;
+    border: 1px solid rgba(15, 118, 110, 0.18);
+    border-radius: 8px;
+    padding: 11px 12px;
+    color: var(--ink);
+    background: #fff;
+    font-weight: 800;
+}
+
+.custom-note {
+    margin: 14px 0 0;
+    color: var(--muted);
+}
+
+.custom-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.save-guide {
+    margin: -4px 0 14px;
+    color: var(--muted);
+    font-weight: 750;
+}
+
+.frame-3d-api-preview {
+    min-height: 260px;
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 10px;
+    text-align: center;
+    border: 1px dashed rgba(15, 118, 110, 0.28);
+    border-radius: 8px;
+    background: linear-gradient(135deg, #f8fcfb, #edf7f4);
+    color: var(--muted);
+    padding: 18px;
+}
+
+.frame-3d-api-preview strong {
+    color: var(--ink);
+    font-size: 1.12rem;
+}
+
+.frame-3d-api-preview span {
+    max-width: 34rem;
+}
+
+.frame-3d-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 8px;
+}
+
+.frame-3d-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+    color: var(--muted);
+    font-weight: 800;
+    font-size: 0.9rem;
+}
+
+.customer-page .camera-fit-controls,
+.onboard-page[data-onboard-step="3"] .camera-fit-controls {
+    order: 4 !important;
+    display: grid !important;
+    margin-top: 10px !important;
+    border-color: rgba(15, 118, 110, 0.24);
+    background: #f3fbf8;
+}
+
+.customer-page .tryon-strip,
+.onboard-page[data-onboard-step="3"] .tryon-strip {
+    order: 5 !important;
+}
+
+.customer-page .camera-controls,
+.onboard-page[data-onboard-step="3"] .camera-controls {
+    order: 6 !important;
+}
+
+.customer-page .camera-fit-controls::before,
+.onboard-page[data-onboard-step="3"] .camera-fit-controls::before {
+    content: "调大小和位置";
+    display: block;
+    grid-column: 1 / -1;
+    color: var(--primary-dark);
+    font-weight: 900;
+}
+
+.onboard-page[data-onboard-step="2"] .camera-controls {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important;
+}
+
+.onboard-page[data-onboard-step="3"] .camera-controls {
+    grid-template-columns: repeat(auto-fit, minmax(126px, 1fr)) !important;
+}
+
+.onboard-page[data-onboard-step="3"] .camera-stage,
+.customer-page .camera-stage {
+    max-height: min(66svh, 620px);
+}
+
+.onboard-page[data-onboard-step="3"] .tryon-strip-track,
+.customer-page .tryon-strip-track {
+    grid-auto-columns: minmax(132px, 156px);
+}
+
+.onboard-page .onboard-step-nav {
+    position: sticky;
+    bottom: 12px;
+    z-index: 28;
+    width: min(100% - 28px, 980px);
+    margin: 18px auto 0;
+    display: grid !important;
+    grid-template-columns: minmax(110px, 1fr) auto minmax(110px, 1fr) minmax(110px, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid rgba(41, 103, 94, 0.14);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 12px 32px rgba(25, 41, 48, 0.08);
+    backdrop-filter: blur(14px);
+}
+
+.onboard-page .onboard-step-nav span {
+    color: var(--muted);
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.onboard-page .onboard-step-nav .btn:disabled {
+    opacity: 0.48;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.chat-image-button {
+    min-width: 72px;
+}
+
+.chat-image-thumb {
+    display: block;
+    margin-top: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: zoom-in;
+}
+
+.chat-image-thumb img {
+    display: block;
+    max-width: min(260px, 62vw);
+    max-height: 220px;
+    border-radius: 8px;
+    object-fit: contain;
+    background: #f4f7f6;
+    border: 1px solid rgba(41, 103, 94, 0.12);
+}
+
+.chat-image-viewer {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: none;
+    place-items: center;
+    padding: 20px;
+    background: rgba(8, 19, 24, 0.72);
+}
+
+.chat-image-viewer.active {
+    display: grid;
+}
+
+.chat-image-viewer-dialog {
+    position: relative;
+    width: min(92vw, 920px);
+    max-height: 90svh;
+    padding: 16px;
+    border-radius: 10px;
+    background: #fff;
+}
+
+.chat-image-viewer-dialog button {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 38px;
+    height: 38px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(8, 19, 24, 0.82);
+    color: #fff;
+    font-size: 1.4rem;
+    cursor: pointer;
+}
+
+.chat-image-viewer-dialog img {
+    display: block;
+    width: 100%;
+    max-height: calc(90svh - 32px);
+    object-fit: contain;
+}
+
+@media (max-width: 980px) {
+    .onboard-page .hero-section {
+        padding: 14px 12px !important;
+    }
+
+    .onboard-page .hero-copy h1 {
+        font-size: clamp(1.65rem, 7vw, 2.5rem);
+    }
+
+    .onboard-page .onboard-step-nav {
+        width: calc(100% - 16px);
+        bottom: 8px;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .onboard-page .onboard-step-nav span {
+        grid-column: 1 / -1;
+        text-align: center;
+        order: -1;
+    }
+
+    .customization-layout,
+    .custom-grid,
+    .custom-actions,
+    .customization-confidence,
+    .frame-3d-meta {
+        grid-template-columns: 1fr !important;
+    }
+
+    .frame-3d-api-preview {
+        min-height: 220px;
+    }
+
+    .chat-page .chat-input-row {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 8px;
+    }
+}
+
+/* Launch stability overrides: keep product workspaces compact across pages. */
+.customer-workbench-strip {
+    width: min(100%, 1220px);
+    margin: -4px auto 16px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.customer-workbench-strip a {
+    min-height: 76px;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+        "num title"
+        "num note";
+    column-gap: 10px;
+    align-items: center;
+    border: 1px solid rgba(15, 118, 110, 0.14);
+    border-radius: 8px;
+    color: inherit;
+    background: rgba(255, 255, 255, 0.96);
+    text-decoration: none;
+    box-shadow: 0 8px 24px rgba(16, 32, 42, 0.06);
+}
+
+.customer-workbench-strip span {
+    grid-area: num;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    color: #fff;
+    background: var(--primary);
+    font-size: 0.82rem;
+    font-weight: 900;
+}
+
+.customer-workbench-strip strong {
+    grid-area: title;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.customer-workbench-strip small {
+    grid-area: note;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 760;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.customer-page .dashboard-heading,
+.customer-page .dashboard-workspace,
+.customer-page .customer-workbench-strip,
+.chat-page .chat-product-bar,
+.chat-page .chat-wechat-shell {
+    max-width: 1220px;
+}
+
+.customer-page .dashboard-card,
+.chat-page .chat-contact-rail,
+.chat-page .chat-info-panel,
+.chat-page .chat-main-panel {
+    border-color: rgba(15, 118, 110, 0.12);
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: 0 10px 28px rgba(16, 32, 42, 0.06);
+}
+
+.customer-page .modeling-system-section,
+.customer-page .workflow-section,
+.customer-page .features-section,
+.customer-page .faq-section {
+    display: none;
+}
+
+.chat-page main {
+    width: calc(100% - clamp(16px, 3vw, 44px));
+    max-width: none;
+}
+
+.chat-page .chat-wechat-shell {
+    min-height: clamp(620px, calc(100svh - 220px), 820px);
+    grid-template-columns: minmax(230px, 0.72fr) minmax(0, 1.55fr) minmax(270px, 0.82fr);
+    gap: 10px;
+}
+
+.chat-page .chat-product-bar div {
+    min-height: 62px;
+    padding: 10px 12px;
+}
+
+.chat-page .chat-input-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+@media (min-width: 1181px) {
+    .customer-page .dashboard-workspace {
+        grid-template-columns: minmax(0, 1.42fr) minmax(330px, 0.78fr);
+        grid-template-areas:
+            "model analysis"
+            "model prefs"
+            "model report"
+            "recommendations report";
+    }
+
+    .customer-page .tryon-panel {
+        position: sticky;
+        top: 14px;
+        align-self: start;
+    }
+}
+
+@media (max-width: 1180px) {
+    .customer-workbench-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .merchant-action-strip {
+        grid-template-columns: 1fr;
+    }
+
+    .chat-page .chat-wechat-shell {
+        grid-template-columns: minmax(220px, 0.78fr) minmax(0, 1.22fr);
+    }
+
+    .chat-page .chat-info-panel {
+        grid-column: 1 / -1;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .customer-workbench-strip {
+        width: 100%;
+        margin: 0 0 10px;
+        display: flex;
+        overflow-x: auto;
+        padding: 0 2px 4px;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .customer-workbench-strip::-webkit-scrollbar,
+    .chat-page .chat-product-bar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .customer-workbench-strip a {
+        flex: 0 0 176px;
+        min-height: 68px;
+        padding: 10px;
+    }
+
+    .customer-page .hero-visual,
+    .chat-page .home-header {
+        display: none;
+    }
+
+    .chat-page main {
+        width: 100%;
+    }
+
+    .chat-page .chat-product-bar {
+        margin: 8px 10px;
+        display: flex;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .chat-page .chat-product-bar div {
+        flex: 0 0 142px;
+    }
+
+    .chat-page .chat-wechat-shell {
+        width: 100%;
+        min-height: 100svh;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+        padding: 0 10px 10px;
+    }
+
+    .chat-page .chat-main-panel {
+        order: 1;
+        min-height: min(78svh, 720px);
+    }
+
+    .chat-page .chat-contact-rail {
+        order: 2;
+    }
+
+    .chat-page .chat-info-panel {
+        order: 3;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .chat-page .chat-thread {
+        min-height: 48svh;
+        padding: 12px;
+    }
+
+    .chat-page .chat-window-head .btn {
+        display: none;
+    }
+
+    .chat-page .chat-input-row {
+        position: sticky;
+        bottom: 0;
+        z-index: 8;
+        padding: 10px;
+    }
+}
+
+/* Mobile polish pass: keep short-flow pages usable on real phones. */
+@media (max-width: 720px) {
+    html {
+        scroll-padding-bottom: 84px;
+    }
+
+    .home-container,
+    .glasses-container {
+        padding-inline: 10px;
+    }
+
+    .site-header,
+    .home-header {
+        margin-bottom: 10px;
+    }
+
+    .header-top {
+        gap: 10px;
+    }
+
+    .header-top .logo {
+        min-width: 0;
+    }
+
+    .header-top .logo span:last-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .top-nav {
+        width: 100%;
+        display: flex;
+        overflow-x: auto;
+        padding-bottom: 2px;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .top-nav::-webkit-scrollbar {
+        display: none;
+    }
+
+    .top-nav a {
+        flex: 0 0 auto;
+        min-width: 44px;
+        min-height: 38px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding-inline: 10px;
+    }
+
+    .customer-page .hero-copy h1,
+    .onboard-page .hero-copy h1 {
+        font-size: clamp(1.45rem, 7vw, 2.25rem);
+        line-height: 1.16;
+    }
+
+    .font-scale-control {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 8px;
+    }
+
+    .camera-stage {
+        max-height: min(520px, 54svh) !important;
+    }
+
+    .camera-empty {
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        width: auto !important;
+        max-width: none;
+        transform: none !important;
+    }
+
+    .action-capture-panel {
+        max-height: none;
+        overflow: visible;
+    }
+
+    .tryon-strip {
+        overflow: hidden;
+    }
+
+    .tryon-strip-track {
+        display: grid;
+        grid-auto-flow: column;
+        overflow-x: auto;
+        overscroll-behavior-inline: contain;
+        scroll-snap-type: x proximity;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+    }
+
+    .tryon-pill {
+        scroll-snap-align: start;
+    }
+
+    .tryon-pill-wish,
+    .tryon-pill-view {
+        min-height: 34px;
+        padding-block: 6px;
+    }
+
+    .recommendation-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .recommendation-list {
+        gap: 8px;
+    }
+
+    .rec-card {
+        padding: 10px;
+    }
+
+    .rec-image {
+        min-height: 78px;
+        margin-bottom: 8px;
+    }
+
+    .rec-title-row {
+        gap: 8px;
+    }
+
+    .rec-title-row h4 {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .rec-merchant,
+    .rec-specs {
+        margin-bottom: 5px;
+    }
+
+    .rec-reason {
+        display: -webkit-box;
+        overflow: hidden;
+        margin-bottom: 8px;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+    }
+
+    .rec-actions {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+    }
+
+    .rec-actions .btn {
+        min-width: 0;
+        min-height: 38px;
+        padding-inline: 6px;
+        font-size: 0.78rem;
+    }
+
+    .camera-controls {
+        max-height: none;
+    }
+
+    .camera-controls .btn,
+    .camera-controls .icon-toggle,
+    .camera-controls select {
+        white-space: nowrap;
+    }
+
+    .camera-fit-controls label {
+        min-width: 0;
+    }
+
+    .onboard-page main {
+        padding-bottom: 76px;
+    }
+
+    .onboard-page .onboard-step-nav {
+        width: calc(100% - 20px);
+        bottom: 8px;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 8px;
+        padding: 8px;
+    }
+
+    .onboard-page .onboard-step-nav span {
+        display: none;
+    }
+
+    .onboard-page .onboard-step-nav .btn {
+        min-width: 0;
+        min-height: 42px;
+        padding-inline: 8px;
+        font-size: 0.86rem;
+    }
+
+    .chat-page .chat-product-bar {
+        margin: 6px 10px 8px;
+    }
+
+    .chat-page .chat-wechat-shell {
+        min-height: 0;
+        padding: 0 10px 12px;
+    }
+
+    .chat-page .chat-main-panel {
+        height: calc(100svh - 176px);
+        min-height: 540px;
+        max-height: 720px;
+    }
+
+    .chat-page .chat-window-head {
+        padding: 12px;
+    }
+
+    .chat-page .chat-thread {
+        min-height: 0;
+        padding: 10px;
+    }
+
+    .chat-page .chat-bubble {
+        max-width: 92%;
+    }
+
+    .chat-page .chat-contact-rail {
+        padding: 12px;
+        max-height: 440px;
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .chat-page .chat-contact-list,
+    .chat-page .chat-merchant-results {
+        max-height: 260px;
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .chat-page .chat-section-title button {
+        min-width: 44px;
+        min-height: 34px;
+        padding-inline: 8px;
+    }
+
+    .chat-page .chat-info-panel {
+        padding: 12px;
+        gap: 10px;
+        max-height: 70svh;
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .chat-page .chat-info-card {
+        padding: 12px;
+    }
+
+    .chat-page .compact-chat-data {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 8px;
+    }
+
+    .chat-page .compact-chat-data div {
+        padding: 10px;
+    }
+
+    .chat-page .chat-prescription-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .chat-page .chat-tools,
+    .chat-page .chat-tools.two-col {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .chat-page .chat-tools .btn {
+        min-width: 0;
+        padding-inline: 8px;
+        white-space: normal;
+    }
+
+    .chat-page .chat-input-row {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 6px;
+    }
+
+    .chat-page .chat-input-row .btn {
+        min-width: 54px;
+        padding-inline: 10px;
+    }
+
+    .frame-viewer-overlay,
+    .chat-image-viewer {
+        padding: 8px;
+    }
+
+    .frame-viewer-dialog,
+    .chat-image-viewer-dialog {
+        width: 100%;
+        max-height: calc(100svh - 16px);
+        border-radius: 8px;
+    }
+
+    .frame-viewer-actions {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ppt-page .ppt-container,
+    .ppt-page .ppt-main,
+    .ppt-page .ppt-player-card,
+    .ppt-page .ppt-reference-card {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .ppt-page .ppt-hero {
+        min-height: auto;
+        padding: 18px 14px;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ppt-page .ppt-player-card {
+        padding: 10px;
+        overflow: hidden;
+    }
+
+    .ppt-page .ppt-toolbar {
+        width: 100%;
+        min-width: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+    }
+
+    .ppt-page .ppt-actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .ppt-page .ppt-actions .btn {
+        min-width: 0;
+        width: 100%;
+        padding-inline: 8px;
+    }
+
+    .ppt-page .ppt-stage {
+        width: 100%;
+        max-width: 100%;
+        max-height: none;
+        aspect-ratio: 16 / 9;
+    }
+
+    .ppt-page .ppt-stage img {
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 100%;
+        object-fit: contain;
+    }
+
+    .ppt-page .ppt-thumb-strip {
+        max-width: 100%;
+        overflow-x: auto;
+        grid-auto-columns: minmax(96px, 38vw);
+    }
+}
+
+@media (min-width: 721px) and (max-width: 1180px) {
+    .chat-page .chat-wechat-shell {
+        min-height: 0;
+    }
+
+    .chat-page .chat-main-panel {
+        min-height: 620px;
+    }
+
+    .chat-page .chat-info-panel {
+        align-self: start;
+    }
+}
+
+@media (max-width: 640px) {
+    .save-image-modal {
+        padding: 8px;
+    }
+
+    .save-image-dialog {
+        max-height: calc(100svh - 16px);
+    }
+
+    .save-image-head {
+        padding: 14px;
+    }
+
+    .save-image-stage {
+        padding: 10px;
+    }
+
+    .save-image-actions,
+    .save-page-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
+    }
+
+    .save-page-shell {
+        width: min(100%, calc(100% - 16px));
+        padding: 8px 0;
+    }
+
+    .save-page-card {
+        padding: 14px;
+    }
+
+    .save-page-head {
+        display: grid;
+    }
+}
+
+/* Final release overrides: keep the camera flow usable across phone, tablet and desktop. */
+.onboard-page[data-onboard-step="2"] .tryon-panel,
+.onboard-page[data-onboard-step="3"] .tryon-panel {
+    display: block !important;
+}
+
+.onboard-page[data-onboard-step="2"] .three-d-preview,
+.onboard-page[data-onboard-step="2"] .tryon-adjust-panel,
+.onboard-page[data-onboard-step="2"] .tryon-strip,
+.onboard-page[data-onboard-step="2"] .camera-fit-controls,
+.onboard-page[data-onboard-step="2"] .wishlist-inline-action,
+.onboard-page[data-onboard-step="2"] #mediapipe-glasses-style,
+.onboard-page[data-onboard-step="2"] .model-actions,
+.onboard-page[data-onboard-step="2"] .face-result-data,
+.onboard-page[data-onboard-step="2"] .tryon-control {
+    display: none !important;
+}
+
+.onboard-page[data-onboard-step="2"] .action-capture-panel,
+.onboard-page[data-onboard-step="2"] .camera-action-guide,
+.onboard-page[data-onboard-step="2"] .size-calibration-inline,
+.onboard-page[data-onboard-step="2"] .recognition-tips {
+    display: grid !important;
+}
+
+.onboard-page[data-onboard-step="2"] .recognition-tips {
+    display: flex !important;
+}
+
+.onboard-page[data-onboard-step="2"] .camera-controls .capture-control,
+.onboard-page[data-onboard-step="2"] .camera-controls .icon-toggle[title*="网格"] {
+    display: inline-flex !important;
+}
+
+.onboard-page[data-onboard-step="3"] .action-capture-panel,
+.onboard-page[data-onboard-step="3"] .recognition-tips,
+.onboard-page[data-onboard-step="3"] .size-calibration-inline,
+.onboard-page[data-onboard-step="3"] .capture-only,
+.onboard-page[data-onboard-step="3"] .capture-control:not(.tryon-control) {
+    display: none !important;
+}
+
+.onboard-page[data-onboard-step="3"] .camera-action-guide,
+.onboard-page[data-onboard-step="3"] .tryon-strip,
+.onboard-page[data-onboard-step="3"] .camera-fit-controls,
+.onboard-page[data-onboard-step="3"] .tryon-control {
+    display: grid !important;
+}
+
+.onboard-page[data-onboard-step="3"] .camera-controls .tryon-control,
+.onboard-page[data-onboard-step="3"] .camera-controls .icon-toggle.tryon-control {
+    display: inline-flex !important;
+}
+
+.onboard-page[data-onboard-step="3"] .camera-controls select.tryon-control {
+    display: block !important;
+}
+
+@media (max-width: 900px) {
+    .onboard-page .dashboard-workspace,
+    .customer-page .dashboard-workspace {
+        width: min(100% - 18px, 760px) !important;
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 12px !important;
+    }
+
+    .onboard-page[data-onboard-step="2"] .camera-stage,
+    .onboard-page[data-onboard-step="3"] .camera-stage,
+    .customer-page .camera-stage {
+        aspect-ratio: 4 / 3 !important;
+        max-height: min(64svh, 560px) !important;
+        min-height: 260px !important;
+    }
+
+    .onboard-page[data-onboard-step="3"] .tryon-strip,
+    .customer-page .tryon-strip {
+        margin-top: 10px !important;
+    }
+}
+
+@media (max-width: 560px) {
+    .onboard-page[data-onboard-step="2"] .camera-stage,
+    .onboard-page[data-onboard-step="3"] .camera-stage,
+    .customer-page .camera-stage {
+        aspect-ratio: 3 / 4 !important;
+        min-height: 360px !important;
+        max-height: min(68svh, 560px) !important;
+    }
+
+    .onboard-page[data-onboard-step="2"] .camera-controls,
+    .onboard-page[data-onboard-step="3"] .camera-controls,
+    .customer-page .camera-controls {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 8px !important;
+        overflow: visible !important;
+    }
+
+    .onboard-page[data-onboard-step="3"] .camera-controls select.tryon-control,
+    .customer-page .camera-controls select {
+        grid-column: 1 / -1;
+        width: 100%;
+    }
+
+    .onboard-page[data-onboard-step="3"] .tryon-strip-track,
+    .customer-page .tryon-strip-track {
+        grid-auto-columns: minmax(132px, 42vw) !important;
     }
 }

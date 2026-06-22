@@ -8,14 +8,14 @@ const PPT_SLIDES = [
     '报告页截图',
     '商家沟通截图',
     '技术路线',
-    '字体与视觉',
+    '产品化优化',
     '隐私与边界',
     '完成度与下一步',
     'Kimi 接入',
-    '结尾'
+    '可验证材料'
 ];
 
-const PPT_ASSET_VERSION = '20260520-private2';
+const PPT_ASSET_VERSION = '20260523-ppt-public2';
 let pptIndex = 0;
 let pptTimer = null;
 

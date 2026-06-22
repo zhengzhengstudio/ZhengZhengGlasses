@@ -1,0 +1,23 @@
+{
+  "name": "铮铮眼镜",
+  "short_name": "铮铮眼镜",
+  "description": "在线试戴、脸型参数采集、配镜报告和商家沟通平台。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eef5f4",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "/assets/app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
