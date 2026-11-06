@@ -12,6 +12,7 @@ let mediapipeApiPromise = null;
 let mediapipeCameraController = null;
 let latestCameraResult = null;
 let latestCameraSamples = [];
+let lastCameraSampleImageAt = 0;
 let latestPreviewMeshPoints = [];
 let latestCleanCameraFrameDataUrl = null;
 let lastCameraUiUpdateAt = 0;
@@ -23,25 +24,29 @@ let cameraFacingMode = localStorage.getItem('zz_glasses_camera_facing') || 'user
 let preloadedVideoLandmarker = null;
 let previewKeypointsEnabled = true;
 let previewGlassesEnabled = true;
-let previewGlassesScale = 1;
+// 试戴预览默认「只要镜」：不画人脸网格、关键点连线与占位椭圆框。
+// 需要调试时通过 zz_glasses_preview_mesh=true 打开。
+let previewShowMesh = localStorage.getItem('zz_glasses_preview_mesh') === 'true';
+let previewGlassesScale = 0.9;
 let previewGlassesOffsetX = 0;
 let previewGlassesOffsetY = 0;
 let previewGlassesRotation = 0;
 let previewGlassesScaleMode = 'manual';
 let previousTryOnAdjustment = null;
 let tryOnCorrectionRunning = false;
+let beautyModeEnabled = localStorage.getItem('zz_glasses_beauty') === 'true';
 let appTextScale = Number(localStorage.getItem('zz_glasses_text_scale') || 1);
 let latestTryOnSnapshotDataUrl = null;
 let latestCameraFrameDataUrl = null;
 let kimiCorrectionStatus = 'checking';
-let cameraGlassesStyle = 'https://glasses.zhengzhengstudio.cn/assets/glasses-frame-ai-01.png?v=20260621-actionfix1';
+let cameraGlassesStyle = 'https://glasses.zhengzhengstudio.cn/assets/glasses-frame-ai-01.webp?v=20260621-actionfix1';
 let selectedFrameId = null;
 let selectedFrameImage = null;
 const selectedFrameImageCache = new Map();
 let currentRecommendations = [];
 let recommendationPage = 0;
 const RECOMMENDATIONS_PER_PAGE = 4;
-const FRAME_INDEX_URL = './frame-index.json?v=20260621-actionfix1';
+const FRAME_INDEX_URL = './frame-index.json?v=20261106-real-brand-frames';
 const FRAME_3D_INDEX_URL = './frame-3d-index.json?v=20260621-actionfix1';
 const faceActionSteps = [
     { id: 'front', label: '看镜头', hint: '看向屏幕中央，保持一小会儿' },
@@ -49,33 +54,39 @@ const faceActionSteps = [
     { id: 'right', label: '右转', hint: '慢慢向右转头，不要移出画面' },
     { id: 'up', label: '抬头', hint: '轻轻抬头，让鼻梁和镜腿角度更清楚' },
     { id: 'down', label: '低头', hint: '轻轻低头，补充鼻托和镜框高度判断' },
-    { id: 'mouth', label: '张嘴', hint: '自然张嘴一下，用来确认是真人动作' },
     { id: 'blink', label: '眨眼', hint: '自然眨一下眼，补充活体动作' }
 ];
 const ACTION_HOLD_FRAMES = {
-    front: 2,
-    left: 1,
-    right: 1,
-    up: 1,
-    down: 1,
-    mouth: 1,
-    blink: 1
+    front: 4,
+    left: 3,
+    right: 3,
+    up: 3,
+    down: 3,
+    blink: 2
 };
 const ACTION_MIN_STEP_MS = {
-    front: 180,
-    left: 110,
-    right: 110,
-    up: 110,
-    down: 110,
-    mouth: 100,
-    blink: 80
+    front: 520,
+    left: 320,
+    right: 320,
+    up: 320,
+    down: 320,
+    blink: 220
 };
 const CAMERA_SAMPLE_LIMIT = 18;
 const TEMP_USER_KEY = 'zz_glasses_temp_user';
 const SERVER_SYNC_QUEUE_KEY = 'zz_glasses_server_sync_queue';
+const PASSPORT_TOKEN_KEY = 'zz_passport_token';
+const SYNCABLE_SESSION_TYPES = new Set([
+    'home_state',
+    'onboard_progress',
+    'onboard_completed',
+    'prescription',
+    'customization',
+    'wishlist'
+]);
 const CHATGPT_MERCHANT = {
-    id: 'chatgpt',
-    name: 'CHATGPT'
+    id: 'kimi',
+    name: 'Kimi 精选'
 };
 const BUILTIN_FRAME_SERIES = [
     ['01', '晨雾金属圆框', '圆框', 299, 'round', 'metal'], ['02', '静黑矩形框', '矩形', 269, 'square', 'acetate'],
@@ -104,7 +115,7 @@ const BUILTIN_FRAME_CATALOG = BUILTIN_FRAME_SERIES.map(([number, name, type, pri
     name,
     merchantId: CHATGPT_MERCHANT.id,
     merchantName: CHATGPT_MERCHANT.name,
-    category: 'CHATGPT',
+    category: 'Kimi',
     type,
     price,
     image: `assets/glasses-frame-v40-${number}.png`,
@@ -131,6 +142,7 @@ let faceActionCapture = {
     bestFrame: null,
     candidateFrames: []
 };
+let isActionCaptureStarting = false;
 let onboardStepIndex = 1;
 
 const AUTH_RETURN_PARAMS = [
@@ -202,7 +214,7 @@ function readAuthUserFromUrl() {
 function persistAuthUser(user) {
     if (!user?.uid) return;
     if (user.temporary) {
-        sessionStorage.setItem(TEMP_USER_KEY, JSON.stringify(user));
+        localStorage.setItem(TEMP_USER_KEY, JSON.stringify(user));
         return;
     }
     localStorage.setItem('zz_passport_user', JSON.stringify(user));
@@ -218,9 +230,11 @@ function cleanupAuthReturnParams() {
 
 async function init() {
     applyTextScale(appTextScale);
+    bindMeasurementInputIntent();
     await loadFrameIndexCatalog();
     await loadFrame3dIndex();
     await loadShopFrameCatalog();
+    applyFrameFromQuery();
     ensureSelectedFrame();
     renderFrameSelect();
     renderDefaultRecommendations();
@@ -348,7 +362,7 @@ function setOnboardStep(delta) {
     saveOnboardStepProgress(false);
     onboardStepIndex = Math.max(1, Math.min(5, onboardStepIndex + delta));
     renderOnboardStep();
-    document.getElementById('onboard-flow')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('onboard-flow')?.scrollIntoView({ behavior: 'auto', block: 'start' });
     saveOnboardStepProgress(false);
 }
 
@@ -386,7 +400,7 @@ async function finishOnboardFlow() {
             step: 5,
             status: 'completed',
             completedSteps: [1, 2, 3, 4, 5],
-            actionSamples: latestCameraSamples.slice(-CAMERA_SAMPLE_LIMIT),
+            actionSamples: latestCameraSamples.slice(-CAMERA_SAMPLE_LIMIT).map(({ image, ...sample }) => sample),
             lastCameraImage: latestCameraFrameDataUrl || latestTryOnSnapshotDataUrl || '',
             finishedAt,
             updatedAt: finishedAt
@@ -455,8 +469,8 @@ function renderOnboardStep() {
     show('.tryon-panel', onboardStepIndex === 2 || onboardStepIndex === 3);
     show('.analysis-card', onboardStepIndex === 4, 'grid');
     show('.preference-card', onboardStepIndex === 3);
-    show('.recommendations-card', onboardStepIndex === 3);
-    show('.analysis-report-card', onboardStepIndex === 4 || onboardStepIndex === 5);
+    show('.recommendations-card', onboardStepIndex === 4);
+    show('.analysis-report-card', onboardStepIndex === 4);
     show('.customization-card', onboardStepIndex === 5);
 
     if (onboardStepIndex === 2) {
@@ -466,6 +480,12 @@ function renderOnboardStep() {
         syncCameraControlState();
     }
     if (onboardStepIndex === 3) {
+        if (faceActionCapture.active) {
+            faceActionCapture.active = false;
+            faceActionCapture.holdCount = 0;
+            renderActionCapture();
+        }
+        document.getElementById('camera-action-guide')?.classList.remove('is-capturing');
         setCameraMeshVisible(false);
         setCameraGlassesVisible(true);
         renderFrameSelect();
@@ -559,7 +579,7 @@ function renderOnboardLoginPrompt() {
     if (!prompt || !document.body.classList.contains('onboard-page')) return;
     if (currentUser?.uid) {
         const title = isTemporaryUser ? '临时配镜用户已启用' : '账号已连接';
-        const actionText = isTemporaryUser ? '临时用户只保留在当前浏览器会话，可继续采集和试戴。登录后再保存到通行证账号。' : '后续采集、心愿单和报告会先缓存到本机；主站接口可用时再同步到服务器。';
+        const actionText = isTemporaryUser ? '临时用户只保存在当前设备本地，可继续采集和试戴。登录后再保存到通行证账号。' : '后续采集、心愿单和报告会先缓存到本机；主站接口可用时再同步到服务器。';
         prompt.innerHTML = `
             <div>
                 <p class="eyebrow">${title}</p>
@@ -599,8 +619,13 @@ async function loadFrameIndexCatalog() {
         const response = await fetch(FRAME_INDEX_URL, { cache: 'force-cache' });
         if (!response.ok) throw new Error(`frame index ${response.status}`);
         const data = await response.json();
+        const excludedFrameIds = new Set(Array.isArray(data.excludedFrameIds) ? data.excludedFrameIds : []);
+        loadExcludedFrameIds(data.excludedFrameIds);
         indexedFrameCatalog = Array.isArray(data.frames)
-            ? data.frames.map(normalizeIndexedFrame).filter(Boolean)
+            ? data.frames
+                .filter(frame => !excludedFrameIds.has(frame?.id))
+                .map(normalizeIndexedFrame)
+                .filter(Boolean)
             : [];
     } catch (error) {
         console.warn('Load frame index failed:', error);
@@ -621,17 +646,38 @@ async function loadFrame3dIndex() {
     }
 }
 
+// 已下架镜框 ID 集合（frame-index.json 的 excludedFrameIds）。
+// 历史上这个字段写了但前端从不读取，导致 61 款问题图仍在展示 —— 这里真正消费它。
+let excludedFrameIdSet = new Set();
+
+function loadExcludedFrameIds(list) {
+    excludedFrameIdSet = new Set(Array.isArray(list) ? list.filter(Boolean) : []);
+}
+
+function isFrameExcluded(id) {
+    return Boolean(id) && excludedFrameIdSet.has(id);
+}
+
 function normalizeIndexedFrame(item) {
     if (!item?.id || !item?.image) return null;
+    // 有下架清单时，真正过滤掉问题图（客户端与商家端共用此入口）
+    if (excludedFrameIdSet.size && isFrameExcluded(item.id)) return null;
     return {
         id: item.id,
         name: item.name || '未命名镜框',
         merchantId: item.merchantId || CHATGPT_MERCHANT.id,
         merchantName: item.merchantName || CHATGPT_MERCHANT.name,
-        category: item.category || 'CHATGPT',
+        category: item.category || 'Kimi',
         type: item.type || '镜框',
         price: Number(item.price || 0),
         image: item.image,
+        // 列表页用 thumb 小图；没有则回退 image（点开看全图仍用 image）
+        thumb: item.thumb || '',
+        originalImage: item.originalImage || item.image,
+        tryOnImage: item.tryOnImage || item.overlayImage || '',
+        tryOnProcessing: item.tryOnProcessing || null,
+        tryOnUnavailableReason: item.tryOnUnavailableReason || '',
+        colorRefImage: item.colorRefImage || '',
         imageAlt: item.imageAlt || `${item.name || '镜框'}图片`,
         style: item.style || inferFrameStyle(item.name || item.type || ''),
         material: item.material || 'mixed',
@@ -652,7 +698,7 @@ async function loadShopFrameCatalog() {
     let remoteFrames = [];
     if (REMOTE_SHOP_API_ENABLED) {
         try {
-            const response = await fetch(`${API_BASE}/api/shop/glasses/catalog`, { cache: 'no-store' });
+            const response = await fetch(`${API_BASE}/api/glasses/catalog`, { cache: 'no-store' });
             if (!response.ok) throw new Error(`shop catalog ${response.status}`);
             const data = await response.json();
             remoteFrames = Array.isArray(data.frames) ? data.frames : [];
@@ -665,7 +711,7 @@ async function loadShopFrameCatalog() {
 
 function normalizeShopFrame(item) {
     if (!item) return null;
-    const image = item.image || item.imageUrl || item.cover || '';
+    const image = item.originalImage || item.image || item.imageUrl || item.cover || '';
     return {
         id: item.id || `shop_${Date.now()}_${Math.random().toString(36).slice(2)}`,
         name: item.name || '未命名镜框',
@@ -675,6 +721,9 @@ function normalizeShopFrame(item) {
         type: item.type || item.frameType || '镜框',
         price: Number(item.price || 0),
         image,
+        originalImage: item.originalImage || image,
+        tryOnImage: item.tryOnImage || item.overlayImage || '',
+        imageCorrection: item.imageCorrection || null,
         imageAlt: item.imageAlt || `${item.name || '镜框'}图片`,
         style: item.style || item.frameStyle || inferFrameStyle(item.name || item.type || item.category),
         material: item.material || item.materialPreference || 'mixed',
@@ -705,17 +754,26 @@ function getFrameCatalog() {
     const builtin = indexedFrameCatalog.length ? indexedFrameCatalog : BUILTIN_FRAME_CATALOG;
     const catalog = [...builtin, ...shopFrameCatalog];
     const seen = new Set();
-    return catalog.filter(frame => {
+    const uniqueFrames = catalog.filter(frame => {
         const key = frame.id || frame.image || frame.name;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
     });
+    return uniqueFrames.sort((a, b) => {
+        const aIsDemo = a.merchantId === CHATGPT_MERCHANT.id || a.merchantName === CHATGPT_MERCHANT.name;
+        const bIsDemo = b.merchantId === CHATGPT_MERCHANT.id || b.merchantName === CHATGPT_MERCHANT.name;
+        return Number(aIsDemo) - Number(bIsDemo);
+    });
 }
 
 function ensureSelectedFrame() {
-    const frame = getSelectedFrame();
-    if (!selectedFrameId && frame) {
+    const catalog = getFrameCatalog();
+    const current = getSelectedFrame();
+    const frame = current && getFrameTryOnSource(current)
+        ? current
+        : catalog.find(item => getFrameTryOnSource(item)) || current;
+    if ((!selectedFrameId || frame?.id !== current?.id) && frame) {
         selectedFrameId = frame.id;
         cameraGlassesStyle = getCameraGlassesPayload(frame);
         preloadSelectedFrameImage(frame);
@@ -726,6 +784,31 @@ function ensureSelectedFrame() {
 function getSelectedFrame() {
     const catalog = getFrameCatalog();
     return catalog.find(frame => frame.id === selectedFrameId) || catalog[0] || null;
+}
+
+/**
+ * 首页镜框库点击「试戴」时带 ?frame=<id> 过来，这里直接选中该镜框。
+ * 必须在 loadShopFrameCatalog() 之后、ensureSelectedFrame() 之前调用。
+ */
+function applyFrameFromQuery() {
+    let frameId = '';
+    try {
+        frameId = (new URLSearchParams(window.location.search).get('frame') || '').trim();
+    } catch (error) {
+        return false;
+    }
+    if (!frameId) return false;
+    const frame = getFrameCatalog().find(item => item.id === frameId);
+    if (!frame) return false;
+    selectedFrameId = frame.id;
+    cameraGlassesStyle = getCameraGlassesPayload(frame);
+    preloadSelectedFrameImage(frame);
+    try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('frame');
+        window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+    } catch (error) {}
+    return true;
 }
 
 function toAbsoluteAssetUrl(src = '') {
@@ -744,9 +827,42 @@ function withoutVersion(src = '') {
     return String(src).split('?')[0];
 }
 
+// 列表/卡片用小图（thumb），避免把详情长图（Paul Frank 920x1875 色卡）压成糊图；
+// 没有 thumb 的旧数据自动回退主图。点开「看全图」仍用原图。
+function getFrameThumb(frame, fallbackIndex) {
+    return frame?.thumb || frame?.image || getFrameImage(fallbackIndex || 0)?.src || '';
+}
+
+function renderFrameThumbImg(frame, fallbackIndex, extraClass = '') {
+    const src = toAbsoluteAssetUrl(getFrameThumb(frame, fallbackIndex));
+    const full = toAbsoluteAssetUrl(frame?.image || '');
+    const alt = frame?.imageAlt || frame?.name || '镜框';
+    const sizes = extraClass.includes('detail')
+        ? '(max-width: 760px) 92vw, 46vw'
+        : '(max-width: 760px) 46vw, 220px';
+    const swapped = Boolean(full) && full !== src;
+    return `<img class="${extraClass}" src="${escapeHtml(src)}"` +
+        (swapped ? ` data-full="${escapeHtml(full)}"` : '') +
+        ` srcset="${escapeHtml(src)} 320w" sizes="${sizes}"` +
+        ` alt="${escapeHtml(alt)}" loading="lazy" decoding="async"` +
+        ` onerror="handleFrameImageError(this)">`;
+}
+
+function getFrameTryOnSource(frame = getSelectedFrame()) {
+    // Product images may contain temples, lens markings, models, or catalog text.
+    // They must never be composited onto a customer's face.
+    return frame?.tryOnImage || '';
+}
+
 function preloadSelectedFrameImage(frame = getSelectedFrame()) {
-    if (!frame?.image) return;
-    const src = toAbsoluteAssetUrl(frame.image);
+    const tryOnSource = getFrameTryOnSource(frame);
+    if (!tryOnSource) {
+        selectedFrameImage = null;
+        drawModelPreview(latestAnalysis);
+        drawFaceOverlay();
+        return;
+    }
+    const src = toAbsoluteAssetUrl(tryOnSource);
     const cached = selectedFrameImageCache.get(src);
     if (cached?.complete) {
         selectedFrameImage = cached;
@@ -764,7 +880,7 @@ function preloadSelectedFrameImage(frame = getSelectedFrame()) {
         }
     };
     image.onerror = () => {
-        const fallback = withoutVersion(toAbsoluteAssetUrl(frame.image));
+        const fallback = withoutVersion(toAbsoluteAssetUrl(tryOnSource));
         if (fallback && fallback !== image.src) image.src = fallback;
     };
     image.src = src;
@@ -773,7 +889,7 @@ function preloadSelectedFrameImage(frame = getSelectedFrame()) {
 function ensureSelectedFrameImageReady(frame = getSelectedFrame()) {
     preloadSelectedFrameImage(frame);
     if (selectedFrameImage?.complete && selectedFrameImage.naturalWidth) return Promise.resolve(selectedFrameImage);
-    const src = frame?.image ? toAbsoluteAssetUrl(frame.image) : '';
+    const src = toAbsoluteAssetUrl(getFrameTryOnSource(frame));
     if (!src) return Promise.resolve(null);
     return new Promise(resolve => {
         const image = selectedFrameImageCache.get(src) || new Image();
@@ -796,11 +912,13 @@ function ensureSelectedFrameImageReady(frame = getSelectedFrame()) {
 function getCameraGlassesPayload(frame = getSelectedFrame()) {
     if (!frame) return cameraGlassesStyle;
     return {
-        src: toAbsoluteAssetUrl(frame.image),
+        src: toAbsoluteAssetUrl(getFrameTryOnSource(frame)),
         scale: Number(frame.overlayScale || 1) * previewGlassesScale,
         offsetX: previewGlassesOffsetX,
         offsetY: previewGlassesOffsetY,
-        rotation: previewGlassesRotation
+        rotation: previewGlassesRotation,
+        hideTemples: true,
+        autoFit: true
     };
 }
 
@@ -809,7 +927,7 @@ function renderFrameSelect() {
     if (!select) return;
 
     const selected = ensureSelectedFrame();
-    const frames = getFrameCatalog();
+    const frames = getFrameCatalog().filter(frame => getFrameTryOnSource(frame));
     if (!frames.length) {
         select.innerHTML = '<option value="">暂无镜框</option>';
         renderTryOnStrip();
@@ -817,7 +935,7 @@ function renderFrameSelect() {
         return;
     }
     select.innerHTML = frames.map(frame => (
-        `<option value="${escapeHtml(frame.id)}">${escapeHtml(frame.name)}</option>`
+        `<option value="${escapeHtml(frame.id)}">${escapeHtml(frame.merchantName || '镜框商家')} · ${escapeHtml(frame.name)}</option>`
     )).join('');
     if (selected) select.value = selected.id;
     renderTryOnStrip();
@@ -939,7 +1057,7 @@ function logout() {
     isLoggedIn = false;
     isTemporaryUser = false;
     localStorage.removeItem('zz_passport_user');
-    sessionStorage.removeItem(TEMP_USER_KEY);
+    localStorage.removeItem(TEMP_USER_KEY);
     sessionStorage.setItem('zz_glasses_ignore_user_param', '1');
     const url = new URL(window.location.href);
     url.searchParams.delete('user');
@@ -948,7 +1066,7 @@ function logout() {
 
 function readTemporaryFittingUser() {
     try {
-        const user = JSON.parse(sessionStorage.getItem(TEMP_USER_KEY) || 'null');
+        const user = JSON.parse(localStorage.getItem(TEMP_USER_KEY) || 'null');
         return user?.temporary && user?.uid ? user : null;
     } catch (error) {
         console.warn('Parse temporary fitting user failed:', error);
@@ -968,7 +1086,7 @@ function createTemporaryFittingUser(event) {
         createdAt: new Date().toISOString(),
         source: 'glasses'
     };
-    sessionStorage.setItem(TEMP_USER_KEY, JSON.stringify(user));
+    localStorage.setItem(TEMP_USER_KEY, JSON.stringify(user));
     sessionStorage.removeItem('zz_glasses_ignore_user_param');
     currentUser = user;
     isTemporaryUser = true;
@@ -981,7 +1099,7 @@ function createTemporaryFittingUser(event) {
 }
 
 function clearTemporaryFittingUser() {
-    sessionStorage.removeItem(TEMP_USER_KEY);
+    localStorage.removeItem(TEMP_USER_KEY);
     currentUser = null;
     isTemporaryUser = false;
     isLoggedIn = false;
@@ -1137,7 +1255,7 @@ function applyModelResult(model = {}, recs = null) {
     setText('rec-width', `${analysis.recommendedLensWidth} mm`);
     setText('bridge-fit', analysis.bridgeLabel);
     setText('temple-fit', analysis.templeLabel);
-    setText('fit-score', `${analysis.fitScore}/100`);
+    setText('fit-score', `${analysis.fitScore}/100 · ${analysis.fitScoreLabel || analysis.riskLevel}`);
     setText('preview-face-shape', analysis.faceShape);
     setText('preview-pd', `${analysis.pd} mm`);
     setText('preview-lens-width', `${analysis.recommendedLensWidth} mm`);
@@ -1150,14 +1268,14 @@ function applyModelResult(model = {}, recs = null) {
     const quickFaceWidthInput = document.getElementById('quick-face-width-input');
     const quickPdInput = document.getElementById('quick-pd-input');
     const quickBridgeWidthInput = document.getElementById('quick-bridge-width-input');
-    if (faceWidthInput) faceWidthInput.value = analysis.faceWidth;
-    if (pdInput) pdInput.value = analysis.pd;
-    if (faceHeightInput && !faceHeightInput.value) faceHeightInput.value = analysis.faceHeight;
-    if (bridgeWidthInput && !bridgeWidthInput.value) bridgeWidthInput.value = analysis.bridgeWidth;
-    if (templeLengthInput && !templeLengthInput.value) templeLengthInput.value = analysis.templeLength;
-    if (quickFaceWidthInput && !quickFaceWidthInput.value) quickFaceWidthInput.value = analysis.faceWidth;
-    if (quickPdInput && !quickPdInput.value) quickPdInput.value = analysis.pd;
-    if (quickBridgeWidthInput && !quickBridgeWidthInput.value) quickBridgeWidthInput.value = analysis.bridgeWidth;
+    setAutoMeasurementValue(faceWidthInput, analysis.faceWidth, true);
+    setAutoMeasurementValue(pdInput, analysis.pd, true);
+    setAutoMeasurementValue(faceHeightInput, analysis.faceHeight);
+    setAutoMeasurementValue(bridgeWidthInput, analysis.bridgeWidth);
+    setAutoMeasurementValue(templeLengthInput, analysis.templeLength);
+    setAutoMeasurementValue(quickFaceWidthInput, analysis.faceWidth);
+    setAutoMeasurementValue(quickPdInput, analysis.pd);
+    setAutoMeasurementValue(quickBridgeWidthInput, analysis.bridgeWidth);
 
     renderAnalysisReport(analysis);
     updateExportButtons();
@@ -1187,19 +1305,30 @@ function buildAnalysis(model = {}) {
     const recommendedLensWidth = getRecommendedLensWidth(pd, recommendedBridgeWidth);
     const recommendedWidth = clampNumber(model.recommendedWidth || Math.round(recommendedLensWidth * 2 + recommendedBridgeWidth + 8), 118, 178);
     const framePd = recommendedLensWidth + recommendedBridgeWidth;
-    const decentration = Number(((framePd - pd) / 2).toFixed(1));
-    const decentrationLabel = Math.abs(decentration) <= 3 ? '理想范围' : Math.abs(decentration) <= 4 ? '可复核' : '不建议';
     const frameSizeLabel = recommendedLensWidth <= 50 ? '小框' : recommendedLensWidth <= 52 ? '中框' : '大框';
     const lensHeight = clampNumber(Math.round(faceHeight * 0.22), 34, 48);
     const bridgeLabel = bridgeWidth <= 16 ? '窄鼻梁：优先可调鼻托' : bridgeWidth >= 22 ? '宽鼻梁：桥位需放宽' : '标准鼻梁：常规鼻托可用';
     const templeLabel = faceWidth >= 150 ? `${templeLength} mm，注意防夹头` : `${templeLength} mm，建议轻量镜腿`;
-    const frameDelta = Math.abs(decentration);
-    const pdBalance = Math.abs(pd - faceWidth * 0.45);
-    const comfortPenalty = preferences.comfort === 'none' ? 0 : 3;
-    const fitScore = clampNumber(Math.round(94 - frameDelta * 4 - pdBalance * 0.7 - comfortPenalty), 72, 98);
-    const riskLevel = fitScore >= 90 ? '低风险' : fitScore >= 82 ? '需确认' : '建议定制';
     const confidence = model.confidence ? clampNumber(model.confidence, 0, 100) : null;
     const scaleInfo = getMeasurementScaleInfo(model, manual);
+    const selectedFrame = getSelectedFrame();
+    const fitAssessment = globalThis.ZZCameraQuality?.calculateFitAssessment({
+        pd,
+        lensWidth: selectedFrame?.lensWidth || recommendedLensWidth,
+        bridgeWidth: selectedFrame?.bridgeSize || selectedFrame?.bridgeWidth || recommendedBridgeWidth,
+        bridgeTarget: recommendedBridgeWidth,
+        measurementConfidence: scaleInfo.confidence,
+        calibrated: scaleInfo.source === 'pd'
+    }) || {
+        score: Math.min(scaleInfo.confidence, 82),
+        decentration: Number(((framePd - pd) / 2).toFixed(1)),
+        label: scaleInfo.source === 'pd' ? '建议复核' : '估算待校准',
+        riskLevel: scaleInfo.source === 'pd' ? '需确认' : '待瞳距校准'
+    };
+    const fitScore = fitAssessment.score;
+    const riskLevel = fitAssessment.riskLevel;
+    const decentration = fitAssessment.decentration;
+    const decentrationLabel = fitAssessment.label;
 
     return {
         ...preferences,
@@ -1220,6 +1349,7 @@ function buildAnalysis(model = {}) {
         bridgeLabel,
         templeLabel,
         fitScore,
+        fitScoreLabel: fitAssessment.label,
         riskLevel,
         source: model.source || 'local',
         confidence,
@@ -1245,12 +1375,39 @@ function getRecommendedLensWidth(pd, bridgeSize) {
 
 function getManualInputs() {
     return {
-        faceWidth: getNumberValue('quick-face-width-input') || getNumberValue('face-width-input'),
-        pd: getNumberValue('quick-pd-input') || getNumberValue('pd-input'),
-        faceHeight: getNumberValue('face-height-input'),
-        bridgeWidth: getNumberValue('quick-bridge-width-input') || getNumberValue('bridge-width-input'),
-        templeLength: getNumberValue('temple-length-input')
+        faceWidth: getManualNumberValue('quick-face-width-input') || getManualNumberValue('face-width-input'),
+        pd: getManualNumberValue('quick-pd-input') || getManualNumberValue('pd-input'),
+        faceHeight: getManualNumberValue('face-height-input'),
+        bridgeWidth: getManualNumberValue('quick-bridge-width-input') || getManualNumberValue('bridge-width-input'),
+        templeLength: getManualNumberValue('temple-length-input')
     };
+}
+
+function bindMeasurementInputIntent() {
+    const ids = [
+        'quick-face-width-input', 'face-width-input', 'quick-pd-input', 'pd-input',
+        'face-height-input', 'quick-bridge-width-input', 'bridge-width-input', 'temple-length-input'
+    ];
+    ids.forEach(id => {
+        const input = document.getElementById(id);
+        if (!input || input.dataset.intentBound === '1') return;
+        input.dataset.intentBound = '1';
+        input.addEventListener('input', () => delete input.dataset.autoFilled);
+    });
+}
+
+function setAutoMeasurementValue(input, value, overwrite = false) {
+    if (!input) return;
+    if (input.value && input.dataset.autoFilled !== '1') return;
+    if (!overwrite && input.value) return;
+    input.value = value;
+    input.dataset.autoFilled = '1';
+}
+
+function getManualNumberValue(id) {
+    const input = document.getElementById(id);
+    if (!input || input.dataset.autoFilled === '1') return null;
+    return getNumberValue(id);
 }
 
 function getMeasurementScaleInfo(model = {}, manual = getManualInputs()) {
@@ -1439,7 +1596,7 @@ function renderAnalysisReport(analysis) {
     report.innerHTML = `
         <div class="report-score">
             <strong>${analysis.fitScore}</strong>
-            <span>综合适配评分</span>
+            <span>当前镜框适配评分</span>
             <em>${analysis.riskLevel}</em>
         </div>
         ${latestTryOnSnapshotDataUrl ? `
@@ -1475,24 +1632,69 @@ function renderAnalysisReport(analysis) {
 
 function buildLocalRecommendations(analysis) {
     const frames = getFrameCatalog();
-    const preferred = frames
+    const scored = frames
         .map(frame => ({ frame, score: scoreFrameForAnalysis(frame, analysis) }))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 12);
+        .sort((a, b) => b.score - a.score);
 
-    return preferred.map(({ frame, score }, index) => ({
+    // 商家配额轮转：目录里陌森 247 款占 78%，若纯按分数取前 12，
+    // 结果几乎全是闪闪 PF 款，新款永远推不出来。
+    // 这里给每个商家最多 4 个名额，按各自分数从高到低占位，
+    // 剩余名额再由所有商家按分数补齐 —— 既保证新款露出，又不让低分款混进来。
+    const LIMIT = 12;
+    const MAX_PER_MERCHANT = 4;
+    const byMerchant = new Map();
+    for (const item of scored) {
+        const key = item.frame.merchantId || item.frame.merchantName || '_';
+        if (!byMerchant.has(key)) byMerchant.set(key, []);
+        byMerchant.get(key).push(item);
+    }
+
+    // 按商家款式数降序排，主力商家先占位（保证每家至少 1 席）
+    const groups = [...byMerchant.entries()]
+        .sort((a, b) => b[1].length - a[1].length)
+        .map(([, items]) => items);
+
+    const picked = [];
+    const used = new Set();
+    let round = 0;
+    while (picked.length < LIMIT && round < MAX_PER_MERCHANT) {
+        for (const items of groups) {
+            if (picked.length >= LIMIT) break;
+            const item = items[round];
+            if (item && !used.has(item)) {
+                used.add(item);
+                picked.push(item);
+            }
+        }
+        round += 1;
+    }
+    // 还有空位则按全局分数补齐（保持高分优先）
+    for (const item of scored) {
+        if (picked.length >= LIMIT) break;
+        if (!used.has(item)) {
+            used.add(item);
+            picked.push(item);
+        }
+    }
+
+    return picked.slice(0, LIMIT).map(({ frame, score }, index) => ({
         ...frame,
-        score: Math.max(80, Math.min(98, score - index)),
+        score: Math.max(35, Math.min(98, Math.round(score - index * 0.5))),
         specs: `镜圈 ${frame.lensWidth || analysis.recommendedLensWidth} mm / 鼻梁 ${frame.bridgeSize || analysis.recommendedBridgeWidth} mm / 移心 ${getFrameDecentration(frame, analysis)} mm`,
         reason: buildRecommendationReason(frame.name, analysis, index, frame)
     }));
 }
 
 function scoreFrameForAnalysis(frame, analysis) {
-    let score = analysis.fitScore || 84;
-    const decentration = Math.abs(getFrameDecentration(frame, analysis));
-    score -= decentration > 3 ? (decentration - 3) * 7 : decentration;
-    score -= Math.abs((frame.lensWidth || analysis.recommendedLensWidth) - analysis.recommendedLensWidth) * 2;
+    const assessment = globalThis.ZZCameraQuality?.calculateFitAssessment({
+        pd: analysis.pd,
+        lensWidth: frame.lensWidth || analysis.recommendedLensWidth,
+        bridgeWidth: frame.bridgeSize || frame.bridgeWidth || analysis.recommendedBridgeWidth,
+        bridgeTarget: analysis.recommendedBridgeWidth,
+        measurementConfidence: analysis.measurementScaleConfidence,
+        calibrated: analysis.measurementScaleSource === 'pd'
+    });
+    let score = assessment?.score || analysis.fitScore || 68;
     if (analysis.material === 'titanium' && frame.material === 'titanium') score += 7;
     if (analysis.material === 'tr90' && frame.material === 'tr90') score += 7;
     if (analysis.material === 'acetate' && frame.material === 'acetate') score += 5;
@@ -1501,7 +1703,8 @@ function scoreFrameForAnalysis(frame, analysis) {
     if (analysis.style === 'light' && ['round', 'halfRim', 'sport'].includes(frame.style)) score += 6;
     if (analysis.faceShape === '圆形' && ['square', 'tortoise', 'sport'].includes(frame.style)) score += 6;
     if (analysis.faceShape === '方形' && ['round', 'aviator'].includes(frame.style)) score += 6;
-    return score;
+    const cap = analysis.measurementScaleSource === 'pd' ? 98 : 82;
+    return Math.max(35, Math.min(cap, score));
 }
 
 function getFrameDecentration(frame, analysis) {
@@ -1521,7 +1724,7 @@ function buildRecommendationReason(name, analysis, index, frame = {}) {
     }[analysis.faceShape] || '按当前参数匹配镜圈宽度与舒适度';
     const decentration = getFrameDecentration(frame, analysis);
     const comfort = Math.abs(decentration) <= 3 ? '移心量在理想范围内。' : '移心量需要验光师复核。';
-    return `${shapeReason} ${name} 来自 ${frame.merchantName || 'CHATGPT'}，镜圈宽度 ${frame.lensWidth || analysis.recommendedLensWidth} mm，鼻梁 ${frame.bridgeSize || analysis.recommendedBridgeWidth} mm，${comfort}`;
+    return `${shapeReason} ${name} 来自 ${frame.merchantName || 'Kimi 精选'}，镜圈宽度 ${frame.lensWidth || analysis.recommendedLensWidth} mm，鼻梁 ${frame.bridgeSize || analysis.recommendedBridgeWidth} mm，${comfort}`;
 }
 
 function refreshLocalAnalysis() {
@@ -1587,7 +1790,98 @@ function escapeHtml(value) {
 }
 
 function jsArg(value) {
-    return JSON.stringify(String(value ?? '')).replace(/</g, '\\u003c');
+    return escapeHtml(JSON.stringify(String(value ?? '')).replace(/</g, '\\u003c'));
+}
+
+// 试戴图边界缓存：key = src + naturalWidth/Height，避免每帧重复扫描像素。
+const tryOnBoundsCache = new Map();
+
+// 计算试戴图中"真正有内容"的区域（基于 alpha 通道）。
+// 历史包袱：旧版硬编码只取中间 78% 宽度来"藏镜腿"，但不同来源的图留白比例差异极大
+// （Kimi 图内容占 20.7%-79.2% 恰好命中，Paul Frank 占 5.6%-94.4% 却被削掉镜腿），
+// 导致 72/132 张试戴图镜片被切。改为按实际内容边界自适应，任何来源都不裁内容。
+function getTryOnContentBounds(image) {
+    const naturalWidth = Number(image?.naturalWidth || image?.width || 0);
+    const naturalHeight = Number(image?.naturalHeight || image?.height || 0);
+    const src = String(image?.src || '');
+    if (!naturalWidth || !naturalHeight) {
+        return { x: 0, y: 0, width: naturalWidth, height: naturalHeight, padded: false };
+    }
+
+    const key = `${src}|${naturalWidth}x${naturalHeight}`;
+    if (tryOnBoundsCache.has(key)) return tryOnBoundsCache.get(key);
+
+    let bounds = { x: 0, y: 0, width: naturalWidth, height: naturalHeight, padded: false };
+    try {
+        const canvas = document.createElement('canvas');
+        const scanWidth = Math.min(360, naturalWidth);
+        const scanHeight = Math.max(1, Math.round(naturalHeight * scanWidth / naturalWidth));
+        canvas.width = scanWidth;
+        canvas.height = scanHeight;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (ctx) {
+            ctx.drawImage(image, 0, 0, scanWidth, scanHeight);
+            const { data } = ctx.getImageData(0, 0, scanWidth, scanHeight);
+            let minX = scanWidth, maxX = -1, minY = scanHeight, maxY = -1;
+            for (let y = 0; y < scanHeight; y += 1) {
+                for (let x = 0; x < scanWidth; x += 1) {
+                    const di = (y * scanWidth + x) * 4;
+                    const da = data[di + 3];
+                    if (da <= 24) continue;                            // 透明留白
+                    const dr = data[di], dg = data[di + 1], db = data[di + 2];
+                    if (dr > 244 && dg > 244 && db > 244) continue;   // 近白底留白
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+            if (maxX > minX && maxY > minY) {
+                const scale = naturalWidth / scanWidth;
+                const padX = (maxX - minX + 1) * scale * 0.04;
+                const padY = (maxY - minY + 1) * scale * 0.04;
+                const left = Math.max(0, Math.round(minX * scale - padX));
+                const top = Math.max(0, Math.round(minY * scale - padY));
+                bounds = {
+                    x: left,
+                    y: top,
+                    width: Math.min(naturalWidth - left, Math.round((maxX - minX + 1) * scale + padX * 2)),
+                    height: Math.min(naturalHeight - top, Math.round((maxY - minY + 1) * scale + padY * 2)),
+                    padded: true
+                };
+            }
+        }
+    } catch (error) {
+        // 跨域或画布被污染时退回整图，绝不裁切
+        console.warn('try-on bounds detection failed:', error);
+    }
+
+    tryOnBoundsCache.set(key, bounds);
+    return bounds;
+}
+
+function getTryOnFrameCrop(image, hideTemples = true) {
+    const bounds = getTryOnContentBounds(image);
+    if (!hideTemples || !bounds.padded) return bounds;
+    return bounds;
+}
+
+// 绘制试戴镜框：始终按内容边界等比适配，绝不裁掉镜片。
+// drawWidth/drawHeight 由调用方按人脸比例决定，这里只负责"把完整镜框塞进目标框"。
+function drawTryOnFrameImage(ctx, image, x, y, width, height, fit = 'contain') {
+    const crop = getTryOnFrameCrop(image, true);
+    if (!crop.width || !crop.height || !width || !height) return;
+
+    if (fit !== 'contain') {
+        ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height, x, y, width, height);
+        return;
+    }
+    // 等比缩放并居中：镜框完整可见，且保持真实比例（避免被拉伸变形）
+    const scale = Math.min(width / crop.width, height / crop.height);
+    const drawW = crop.width * scale;
+    const drawH = crop.height * scale;
+    ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height,
+        x + (width - drawW) / 2, y + (height - drawH) / 2, drawW, drawH);
 }
 
 function updateRecognition(status, confidence, progress) {
@@ -1603,7 +1897,7 @@ function updateRecognition(status, confidence, progress) {
 
 async function loadMediapipeApi() {
     if (!mediapipeApiPromise) {
-        mediapipeApiPromise = import('./mediapipe-camera.mjs?v=20260621-actionfix1');
+        mediapipeApiPromise = import('./mediapipe-camera.mjs?v=15c5df06');
     }
     return mediapipeApiPromise;
 }
@@ -1839,6 +2133,18 @@ function toUnitPoint(point) {
     };
 }
 
+function withTimeout(promise, ms, errorMessage) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new Error(`TIMEOUT: ${errorMessage} (${ms}ms)`));
+        }, ms);
+        promise.then(
+            (result) => { clearTimeout(timer); resolve(result); },
+            (error) => { clearTimeout(timer); reject(error); }
+        );
+    });
+}
+
 async function startMediapipeCamera() {
     const video = document.getElementById('mediapipe-video');
     const canvas = document.getElementById('mediapipe-overlay');
@@ -1850,6 +2156,10 @@ async function startMediapipeCamera() {
 
     try {
         isCameraStarting = true;
+        if (document.permissionsPolicy?.allowsFeature?.('camera') === false) {
+            throw new Error('PERMISSIONS_POLICY_BLOCKED: 当前承载页面禁止使用摄像头');
+        }
+        setCameraFallbackState('opening');
         applyCameraFacingState();
         renderFrameSelect();
         refreshCameraGlassesPayload();
@@ -1860,58 +2170,69 @@ async function startMediapipeCamera() {
 
         updateCameraStatus('打开摄像头');
         updateRecognition('正在打开摄像头', 20, 18);
-        const api = await loadMediapipeApi();
-        mediapipeCameraController = await api.createMediapipeCamera({
-            video,
-            canvas,
-            facingMode: cameraFacingMode,
-            drawMesh: cameraMeshEnabled,
-            drawGlasses: cameraGlassesEnabled,
-            glassesStyle: cameraGlassesStyle,
-            landmarker: preloadedVideoLandmarker,
-            onStatus(status) {
-                updateCameraStatus({
-                    opening: '打开摄像头',
-                    preview: '画面已打开',
-                    loading: '准备识别',
-                    running: '实时识别中',
-                    model_error: '识别模型失败',
-                    stopped: '已停止'
-                }[status] || status);
-                if (status === 'preview') {
-                    updateRecognition('摄像头已打开，正在准备识别', 12, 26);
-                    updateCameraActionGuide('准备识别', '画面已经打开', '先把脸放到画面中央，模型加载完成后会自动开始识别。');
-                }
-                if (status === 'loading') {
-                    updateRecognition('正在加载人脸识别模型', 18, 36);
-                }
-                if (status === 'running') {
-                    updateCameraActionGuide('可以开始', '保持脸在画面中央', '现在可以单张生成、实时试戴，或进入多角度采集。');
-                }
-                if (status === 'model_error') {
-                    updateCameraActionGuide('识别失败', '模型加载失败', '摄像头画面仍可用。请检查网络，或刷新页面后重试。');
-                }
-                syncCameraControlState();
-            },
-            onResult(result) {
-                latestCameraResult = result;
-                const now = performance.now();
-                const shouldUpdateUi = now - lastCameraUiUpdateAt > 160;
-                if (result?.landmarks) {
-                    const quality = trackCameraSample(result, video);
-                    if (shouldUpdateUi) {
-                        lastCameraUiUpdateAt = now;
-                        updateRecognition('摄像机实时识别', quality.confidence, 72);
-                        updateActionMetrics(result.action);
+
+        const api = await withTimeout(loadMediapipeApi(), 15000, '加载 MediaPipe 库超时');
+        mediapipeCameraController = await withTimeout(
+            api.createMediapipeCamera({
+                video,
+                canvas,
+                facingMode: cameraFacingMode,
+                drawMesh: cameraMeshEnabled,
+                drawGlasses: cameraGlassesEnabled,
+                glassesStyle: cameraGlassesStyle,
+                landmarker: preloadedVideoLandmarker,
+                onStatus(status) {
+                    updateCameraStatus({
+                        opening: '打开摄像头',
+                        preview: '画面已打开',
+                        loading: '准备识别',
+                        running: '实时识别中',
+                        model_error: '识别模型失败',
+                        camera_error: '摄像机错误',
+                        stopped: '已停止'
+                    }[status] || status);
+                    if (status === 'preview') {
+                        setCameraFallbackState('ready');
+                        updateRecognition('摄像头已打开，正在准备识别', 12, 26);
+                        updateCameraActionGuide('准备识别', '画面已经打开', '先把脸放到画面中央，模型加载完成后会自动开始识别。');
                     }
-                    handleActionCaptureFrame(result);
-                } else if (shouldUpdateUi) {
-                    lastCameraUiUpdateAt = now;
-                    updateRecognition('请把脸放入画面', 18, 28);
-                    updateActionMetrics(null);
+                    if (status === 'loading') {
+                        updateRecognition('正在加载人脸识别模型', 18, 36);
+                    }
+                    if (status === 'running') {
+                        setCameraFallbackState('ready');
+                        updateCameraActionGuide('可以开始', '保持脸在画面中央', '现在可以单张生成、实时试戴，或进入多角度采集。');
+                    }
+                    if (status === 'model_error') {
+                        updateCameraActionGuide('识别失败', '模型加载失败', '摄像头画面仍可用。请检查网络，或刷新页面后重试。');
+                    }
+                    if (status === 'camera_error') {
+                        updateCameraActionGuide('摄像机错误', '无法打开摄像头', '请检查浏览器权限设置，或尝试使用其他浏览器。');
+                    }
+                    syncCameraControlState();
+                },
+                onResult(result) {
+                    latestCameraResult = result;
+                    const now = performance.now();
+                    const shouldUpdateUi = now - lastCameraUiUpdateAt > 160;
+                    if (result?.landmarks) {
+                        const quality = trackCameraSample(result, video);
+                        if (shouldUpdateUi) {
+                            lastCameraUiUpdateAt = now;
+                            updateRecognition('摄像机实时识别', quality.confidence, 72);
+                            updateActionMetrics(result.action);
+                        }
+                        handleActionCaptureFrame(result);
+                    } else if (shouldUpdateUi) {
+                        lastCameraUiUpdateAt = now;
+                        updateRecognition('请把脸放入画面', 18, 28);
+                        updateActionMetrics(null);
+                    }
                 }
-            }
-        });
+            }),
+            15000,
+            '启动摄像头超时'
+        );
         syncCameraControlState();
         showToast('摄像头画面已打开，识别模型会自动准备');
     } catch (error) {
@@ -1919,11 +2240,72 @@ async function startMediapipeCamera() {
         mediapipeCameraController = null;
         updateCameraStatus('摄像机不可用');
         updateRecognition('摄像机不可用', 0, 0);
-        showToast('无法打开摄像头，请检查权限或浏览器支持');
+
+        const errorMessage = String(error.message || error);
+        let toastMessage = '无法打开摄像头，请检查权限或浏览器支持';
+
+        if (errorMessage.includes('TIMEOUT')) {
+            toastMessage = '摄像头启动超时，请检查网络连接或刷新页面重试';
+        } else if (errorMessage.includes('PERMISSIONS_POLICY_BLOCKED')) {
+            toastMessage = '当前窗口禁用了摄像头，请在系统浏览器打开或上传照片继续';
+        } else if (errorMessage.includes('PERMISSION_DENIED')) {
+            toastMessage = '摄像头权限被拒绝，请在浏览器设置中允许访问摄像头';
+        } else if (errorMessage.includes('CAMERA_NOT_FOUND')) {
+            toastMessage = '未检测到摄像头设备，请检查设备连接';
+        } else if (errorMessage.includes('CAMERA_BUSY')) {
+            toastMessage = '摄像头正在被其他应用占用，请先关闭其他应用';
+        } else if (errorMessage.includes('VIDEO_PLAY_ERROR')) {
+            toastMessage = '无法播放摄像头画面，请刷新页面重试';
+        } else if (errorMessage.includes('NotAllowedError')) {
+            toastMessage = '摄像头权限被拒绝，请在浏览器设置中允许访问';
+        } else if (errorMessage.includes('NotFoundError')) {
+            toastMessage = '未检测到摄像头设备';
+        } else if (errorMessage.includes('NotReadableError')) {
+            toastMessage = '摄像头正在被占用，请关闭其他应用';
+        }
+
+        const policyBlocked = document.permissionsPolicy?.allowsFeature?.('camera') === false;
+        setCameraFallbackState('error', policyBlocked
+            ? '当前窗口不允许使用摄像头。请在系统浏览器中打开本页，或上传正面照片继续。'
+            : toastMessage);
+        updateCameraActionGuide(
+            '摄像头未启动',
+            policyBlocked ? '请在系统浏览器打开' : '请允许摄像头权限',
+            '你也可以上传正面照片完成识别，流程不会中断。',
+            'error'
+        );
+        showToast(policyBlocked ? '当前窗口禁用了摄像头，可在系统浏览器打开或上传照片继续' : toastMessage);
     } finally {
         isCameraStarting = false;
         syncCameraControlState();
     }
+}
+
+function setCameraFallbackState(state = 'idle', message = '') {
+    const empty = document.getElementById('camera-empty-state');
+    if (!empty) return;
+
+    empty.classList.toggle('is-hidden', state === 'ready');
+    empty.setAttribute('aria-hidden', String(state === 'ready'));
+    if (state === 'ready') return;
+
+    if (state === 'opening') {
+        empty.innerHTML = '<strong>正在打开摄像头</strong><span>首次加载人脸模型可能需要几秒，请保持此页面打开。</span>';
+        return;
+    }
+
+    if (state === 'error') {
+        empty.innerHTML = `
+            <strong>摄像头暂时不可用</strong>
+            <span>${escapeHtml(message || '请检查浏览器权限，或上传正面照片继续。')}</span>
+            <div class="camera-empty-actions">
+                <button class="camera-empty-action primary" type="button" onclick="startMediapipeCamera()">重新尝试</button>
+                <button class="camera-empty-action" type="button" onclick="document.getElementById('face-photo-input')?.click()">上传照片继续</button>
+            </div>`;
+        return;
+    }
+
+    empty.innerHTML = '<strong>打开摄像头开始采集</strong><span>允许权限后，可实时识别人脸并叠加镜框。</span><button class="camera-empty-action" type="button" onclick="document.getElementById(\'face-photo-input\')?.click()">也可以上传正面照片</button>';
 }
 
 async function switchMediapipeCamera() {
@@ -1958,6 +2340,8 @@ function stopMediapipeCamera(options = {}) {
     latestCameraResult = null;
     latestCameraSamples = [];
     isCameraStarting = false;
+    isActionCaptureStarting = false;
+    setCameraFallbackState('idle');
     updateCameraStatus('已停止');
     if (faceActionCapture.active) {
         faceActionCapture.active = false;
@@ -1972,16 +2356,36 @@ function trackCameraSample(result, image) {
     const leftEye = getEyeCenter(result.landmarks, 'left');
     const rightEye = getEyeCenter(result.landmarks, 'right');
     const quality = getLandmarkQuality(result.landmarks, image, leftEye, rightEye);
+    const now = performance.now();
     const isStableFront = quality.confidence >= 68 && Math.abs(result.action?.yaw || 0) < 0.06 && Math.abs(result.action?.pitch || 0.34) < 0.42;
     if (isStableFront) {
+        const snapshot = now - lastCameraSampleImageAt >= 180 ? captureCameraFrameSnapshot(image) : null;
+        if (snapshot) lastCameraSampleImageAt = now;
+        const sampleScore = globalThis.ZZCameraQuality?.scoreCameraSample({
+            confidence: quality.confidence,
+            yaw: result.action?.yaw,
+            roll: quality.roll,
+            eyeOpen: result.action?.eyeOpen,
+            sharpness: snapshot?.sharpness || 0,
+            brightness: snapshot?.brightness || 0.5
+        }) || quality.confidence;
         latestCameraSamples.push({
             landmarks: cloneLandmarks(result.landmarks),
+            action: { ...(result.action || {}) },
             quality,
-            capturedAt: performance.now()
+            image: snapshot?.dataUrl || '',
+            sampleScore,
+            capturedAt: now
         });
         latestCameraSamples = latestCameraSamples.slice(-CAMERA_SAMPLE_LIMIT);
     }
     return quality;
+}
+
+function getBestCameraSample(since = 0) {
+    const fresh = latestCameraSamples.filter(sample => sample.image && sample.capturedAt >= since);
+    const candidates = fresh.length ? fresh : latestCameraSamples.filter(sample => sample.image).slice(-8);
+    return candidates.sort((a, b) => (b.sampleScore || 0) - (a.sampleScore || 0))[0] || null;
 }
 
 function getStableCameraLandmarks() {
@@ -2027,7 +2431,7 @@ function warnMediapipeModelNotReady() {
     showToast('识别模型还在准备，请稍等几秒');
 }
 
-function captureMediapipeModel() {
+async function captureMediapipeModel() {
     if (mediapipeCameraController && !isMediapipeModelReady()) {
         warnMediapipeModelNotReady();
         return;
@@ -2038,8 +2442,17 @@ function captureMediapipeModel() {
     }
 
     const video = document.getElementById('mediapipe-video');
-    const stableLandmarks = getStableCameraLandmarks() || latestCameraResult.landmarks;
-    const frameLandmarks = latestCameraResult.landmarks;
+    const button = document.getElementById('camera-single-frame-btn');
+    const requestedAt = performance.now();
+    if (button) {
+        button.disabled = true;
+        button.textContent = '正在挑选清晰画面';
+    }
+    updateCameraActionGuide('单帧生成', '请注视屏幕并自然睁眼', '系统会从接下来约 0.7 秒画面中选择更清晰、端正的一帧。');
+    await new Promise(resolve => setTimeout(resolve, 700));
+    const bestSample = getBestCameraSample(requestedAt);
+    const stableLandmarks = bestSample?.landmarks || getStableCameraLandmarks() || latestCameraResult.landmarks;
+    const frameLandmarks = bestSample?.landmarks || latestCameraResult.landmarks;
     const sampleCount = latestCameraSamples.length;
 
     let model;
@@ -2058,26 +2471,45 @@ function captureMediapipeModel() {
         });
     }
 
-    setPreviewFromCameraFrame(video);
+    if (bestSample?.image) setPreviewFromDataUrl(bestSample.image, cameraFacingMode === 'user');
+    else setPreviewFromCameraFrame(video);
     applyModelResult({
         ...model,
         source: 'mediapipe_free',
         previewMeshPoints: frameLandmarks,
-        confidence: Math.min(98, (model.confidence || 80) + Math.min(sampleCount, 8)),
-        calibrationNote: `${model.calibrationNote} 已从 ${sampleCount || 1} 帧实时画面取稳定正脸均值；如需更稳，可继续做一次多角度采集。`
+        confidence: Math.min(96, model.confidence || 80),
+        calibrationNote: `${model.calibrationNote} 单帧结果使用了照片与关键点完全对应的睁眼正脸帧；正式配镜仍请用真实瞳距校准。`
     }, buildLocalRecommendations(buildAnalysis(model)));
     updateRecognition('单张生成完成', model.confidence, 100);
-    showToast('已用摄像机画面生成配镜参数');
+    updateCameraActionGuide('单帧完成', '已选取较清晰的睁眼正脸', '可以继续试戴、微调镜框，或重新生成一张。', 'done');
+    if (button) {
+        button.disabled = false;
+        button.textContent = '重新生成单帧';
+    }
+    showToast(bestSample ? '已选取较清晰的睁眼正脸帧' : '已用当前摄像机画面生成参数');
 }
 
 async function startActionCapture() {
+    if (isActionCaptureStarting) {
+        showToast('正在准备人脸识别，请稍等');
+        return;
+    }
+    isActionCaptureStarting = true;
+    updateCameraActionGuide('正在准备', '启动人脸识别', '首次加载可能需要几秒，准备好后会自动进入第 1 个动作。');
     if (!mediapipeCameraController) {
         await startMediapipeCamera();
-        if (!mediapipeCameraController) return;
+        if (!mediapipeCameraController) {
+            isActionCaptureStarting = false;
+            return;
+        }
     }
     if (!isMediapipeModelReady()) {
-        warnMediapipeModelNotReady();
-        return;
+        const ready = await waitForMediapipeModelReady(14000);
+        if (!ready) {
+            isActionCaptureStarting = false;
+            warnMediapipeModelNotReady();
+            return;
+        }
     }
     setCameraMeshVisible(true);
     setCameraGlassesVisible(false);
@@ -2092,12 +2524,33 @@ async function startActionCapture() {
         baselineAction: null,
         stepStartedAt: performance.now(),
         bestFrame: null,
-        candidateFrames: []
+        candidateFrames: [],
+        lastGuideUpdateAt: performance.now()
     };
     renderActionCapture();
     updateActionPrompt();
     updateRecognition('多角度采集中', 42, 8);
     showToast('按提示完成动作，系统会自动捕捉关键帧');
+    document.querySelector('.camera-stage')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    isActionCaptureStarting = false;
+}
+
+function waitForMediapipeModelReady(timeoutMs = 14000) {
+    const startedAt = performance.now();
+    return new Promise(resolve => {
+        const check = () => {
+            if (isMediapipeModelReady()) {
+                resolve(true);
+                return;
+            }
+            if (!mediapipeCameraController || performance.now() - startedAt >= timeoutMs) {
+                resolve(false);
+                return;
+            }
+            window.setTimeout(check, 120);
+        };
+        check();
+    });
 }
 
 function resetActionCapture() {
@@ -2111,7 +2564,8 @@ function resetActionCapture() {
         baselineAction: null,
         stepStartedAt: 0,
         bestFrame: null,
-        candidateFrames: []
+        candidateFrames: [],
+        lastGuideUpdateAt: 0
     };
     renderActionCapture();
     updateActionPrompt('等待开始多角度采集');
@@ -2122,6 +2576,16 @@ function resetActionCapture() {
     }
 }
 
+function clearActionCaptureResult() {
+    if (!confirm('确定要删除本次多角度采集的图片和参数吗？删除后需要重新采集。')) return;
+    resetActionCapture();
+    latestCleanCameraFrameDataUrl = null;
+    if (latestCameraResult) {
+        latestCameraResult.actionCaptureFrames = null;
+    }
+    showToast('已删除本次多角度采集数据');
+}
+
 function skipCurrentActionCaptureStep() {
     if (!faceActionCapture.active) {
         showToast('请先开始多角度采集');
@@ -2129,11 +2593,11 @@ function skipCurrentActionCaptureStep() {
     }
     const step = faceActionSteps[faceActionCapture.currentIndex];
     if (!step) return;
-    const fallback = faceActionCapture.bestFrame || (latestCameraResult?.landmarks ? {
+    const fallback = latestCameraResult?.landmarks ? {
         landmarks: cloneLandmarks(latestCameraResult.landmarks),
         action: { ...(latestCameraResult.action || {}) },
         quality: 0.2
-    } : null);
+    } : faceActionCapture.bestFrame;
     if (!fallback?.landmarks) {
         showToast('还没有识别到人脸，先把脸放到画面中央');
         return;
@@ -2152,7 +2616,7 @@ function handleActionCaptureFrame(result) {
     const minStepMs = typeof ACTION_MIN_STEP_MS === 'object' ? (ACTION_MIN_STEP_MS[step.id] || 500) : ACTION_MIN_STEP_MS;
     const frameQuality = getActionFrameQuality(result.landmarks);
     rememberActionBestFrame(result, frameQuality);
-    if (frameQuality < 0.1) {
+    if (frameQuality < 0.06) {
         faceActionCapture.holdCount = 0;
         faceActionCapture.lastMatchedStep = null;
         faceActionCapture.matchedSince = 0;
@@ -2184,8 +2648,10 @@ function handleActionCaptureFrame(result) {
             faceActionCapture.frames.push({
                 id: step.id,
                 label: step.label,
-                landmarks: averageLandmarkFrames(faceActionCapture.candidateFrames) || result.landmarks,
-                action: result.action,
+                // Keep the detected points and saved photo on the same frame.
+                // Averaging older points over the newest image tilts the mesh.
+                landmarks: cloneLandmarks(result.landmarks),
+                action: { ...result.action },
                 image,
                 capturedAt: Date.now()
             });
@@ -2222,32 +2688,28 @@ function isActionStepMatched(stepId, action = {}) {
     const baseline = faceActionCapture.baselineAction || action;
     const yawDelta = Number(action.yaw || 0) - Number(baseline.yaw || 0);
     const pitchDelta = Number(action.pitch || 0) - Number(baseline.pitch || 0);
-    const mouthBase = Number(baseline.mouthOpen || 0);
     const eyeBase = Number(baseline.eyeOpen || 0.024);
 
     if (stepId === 'front') {
-        return Math.abs(action.yaw || 0) < 0.2
+        return Math.abs(action.yaw || 0) < 0.12
             && (action.mouthOpen || 0) < 0.08
             && (action.eyeOpen || 0) > 0.004;
     }
-    if (stepId === 'left') return Math.abs(yawDelta) > 0.012 || action.matched?.left || action.matched?.right;
+    if (stepId === 'left') return Math.abs(yawDelta) > 0.032;
     if (stepId === 'right') {
         const leftAction = faceActionCapture.frames.find(frame => frame.id === 'left')?.action;
         const leftDelta = leftAction ? Number(leftAction.yaw || 0) - Number(baseline.yaw || 0) : 0;
-        if (leftAction && Math.sign(yawDelta || 0) !== Math.sign(leftDelta || 0) && Math.abs(yawDelta) > 0.009) return true;
-        if (leftAction && Math.abs(Number(action.yaw || 0) - Number(leftAction.yaw || 0)) > 0.024) return true;
-        return Math.abs(yawDelta) > 0.016 || action.matched?.left || action.matched?.right;
+        if (leftAction && Math.sign(yawDelta || 0) !== Math.sign(leftDelta || 0) && Math.abs(yawDelta) > 0.026) return true;
+        return Boolean(leftAction && Math.abs(Number(action.yaw || 0) - Number(leftAction.yaw || 0)) > 0.052);
     }
-    if (stepId === 'up') return Math.abs(pitchDelta) > 0.01 || action.matched?.up || action.matched?.down;
+    if (stepId === 'up') return Math.abs(pitchDelta) > 0.028;
     if (stepId === 'down') {
         const upAction = faceActionCapture.frames.find(frame => frame.id === 'up')?.action;
         const upDelta = upAction ? Number(upAction.pitch || 0) - Number(baseline.pitch || 0) : 0;
-        if (upAction && Math.sign(pitchDelta || 0) !== Math.sign(upDelta || 0) && Math.abs(pitchDelta) > 0.008) return true;
-        if (upAction && Math.abs(Number(action.pitch || 0) - Number(upAction.pitch || 0)) > 0.018) return true;
-        return Math.abs(pitchDelta) > 0.014 || action.matched?.up || action.matched?.down;
+        if (upAction && Math.sign(pitchDelta || 0) !== Math.sign(upDelta || 0) && Math.abs(pitchDelta) > 0.024) return true;
+        return Boolean(upAction && Math.abs(Number(action.pitch || 0) - Number(upAction.pitch || 0)) > 0.045);
     }
-    if (stepId === 'mouth') return (action.mouthOpen || 0) > Math.max(0.02, mouthBase + 0.006);
-    if (stepId === 'blink') return (action.eyeOpen || 0) < Math.max(0.018, eyeBase * 0.9);
+    if (stepId === 'blink') return (action.eyeOpen || 0) < Math.min(0.022, eyeBase * 0.72);
     return Boolean(action.matched?.[stepId]);
 }
 
@@ -2271,8 +2733,12 @@ function maybeAutoAcceptLooseActionStep(step, result, frameQuality, holdFrames) 
     const action = result.action || {};
     let detail = getActionMissHint(step.id, action);
 
-    if (elapsed > 6500 && frameQuality > 0.18 && faceActionCapture.bestFrame?.landmarks && step.id !== 'front') {
-        acceptActionStepFromFrame(step, faceActionCapture.bestFrame, true);
+    if (elapsed > 5500 && frameQuality > 0.12 && result.landmarks && step.id !== 'front') {
+        acceptActionStepFromFrame(step, {
+            landmarks: cloneLandmarks(result.landmarks),
+            action: { ...action },
+            quality: frameQuality
+        }, true);
         return;
     }
 
@@ -2284,11 +2750,10 @@ function getActionMissHint(stepId, action = {}) {
     const yawDelta = Number(action.yaw || 0) - Number(baseline.yaw || 0);
     const pitchDelta = Number(action.pitch || 0) - Number(baseline.pitch || 0);
     if (stepId === 'front') return '正对屏幕、眼睛睁开，停一下就会采集';
-    if (stepId === 'left') return `向任意一侧轻轻转头，目前左右变化 ${Math.abs(yawDelta).toFixed(2)}`;
-    if (stepId === 'right') return `转到另一侧，目前左右变化 ${Math.abs(yawDelta).toFixed(2)}`;
-    if (stepId === 'up') return `抬头或低头都可，先采一个方向，目前上下变化 ${Math.abs(pitchDelta).toFixed(2)}`;
-    if (stepId === 'down') return `换另一个上下方向，目前上下变化 ${Math.abs(pitchDelta).toFixed(2)}`;
-    if (stepId === 'mouth') return `自然张嘴一下，目前张嘴值 ${(action.mouthOpen || 0).toFixed(2)}`;
+    if (stepId === 'left') return `向屏幕左侧轻轻转头，不要移出画面（变化 ${Math.abs(yawDelta).toFixed(2)}）`;
+    if (stepId === 'right') return `再转向另一侧，幅度不用大（变化 ${Math.abs(yawDelta).toFixed(2)}）`;
+    if (stepId === 'up') return `轻轻抬头，保持眼睛还在画面里（变化 ${Math.abs(pitchDelta).toFixed(2)}）`;
+    if (stepId === 'down') return `再轻轻低头，换到相反方向（变化 ${Math.abs(pitchDelta).toFixed(2)}）`;
     if (stepId === 'blink') return `眨一下眼，或者点“跳过当前动作”继续`;
     return '保持动作一下';
 }
@@ -2297,7 +2762,9 @@ function acceptActionStepFromFrame(step, frame, loose = false) {
     if (!step || !frame?.landmarks) return;
     if (faceActionCapture.frames.some(item => item.id === step.id)) return;
     const video = document.getElementById('mediapipe-video');
-    const image = step.id !== 'blink' ? captureCameraFrameDataUrl(video) : '';
+    const image = step.id !== 'blink'
+        ? (frame.image || captureCameraFrameDataUrl(video))
+        : '';
     faceActionCapture.frames.push({
         id: step.id,
         label: step.label,
@@ -2362,7 +2829,6 @@ function finishActionCapture() {
     const right = faceActionCapture.frames.find(frame => frame.id === 'right')?.action;
     const up = faceActionCapture.frames.find(frame => frame.id === 'up')?.action;
     const down = faceActionCapture.frames.find(frame => frame.id === 'down')?.action;
-    const mouth = faceActionCapture.frames.find(frame => frame.id === 'mouth')?.action;
     const blink = faceActionCapture.frames.find(frame => frame.id === 'blink')?.action;
     const yawSpan = left && right ? Math.abs(left.yaw - right.yaw) : 0;
     const pitchSpan = up && down ? Math.abs(up.pitch - down.pitch) : 0;
@@ -2372,7 +2838,6 @@ function finishActionCapture() {
     const actionQualityIssues = [];
     if (yawSpan < 0.12) actionQualityIssues.push('左右转头幅度偏小，镜圈宽度和镜腿建议需要人工复核');
     if (pitchSpan < 0.08) actionQualityIssues.push('上下动作幅度偏小，鼻托和镜框高度建议需要人工复核');
-    if (!mouth || mouth.mouthOpen <= 0.045) actionQualityIssues.push('张嘴动作较弱，建议重新采集或人工复核');
     if (!blink || blink.eyeOpen >= 0.011) actionQualityIssues.push('眨眼动作未确认，活体动作完整度需要人工复核');
 
     applyModelResult({
@@ -2391,7 +2856,7 @@ function finishActionCapture() {
     updateCameraActionGuide('完成', '已生成多角度配镜参数', '你可以换镜框继续试戴，也可以重新采集一次。', 'done');
     updateRecognition('多角度结果完成', confidence, 100);
     showToast('多角度采集完成，已生成更稳的配镜参数');
-    setCameraGlassesVisible(true);
+    // 采集完成后不自动显示眼镜，让用户自己点击试戴
 }
 
 function updateActionPrompt(text = null, holdCount = 0, maxFrames = 6) {
@@ -2399,6 +2864,11 @@ function updateActionPrompt(text = null, holdCount = 0, maxFrames = 6) {
     const progressText = holdCount > 0 ? ` · 保持 ${holdCount}/${maxFrames}` : '';
     const prompt = text || (step ? `${step.label}：${step.hint}${progressText}` : '多角度采集完成');
     setText('action-capture-prompt', prompt);
+    const completed = Math.min(faceActionCapture.currentIndex, faceActionSteps.length);
+    const holdProgress = step && maxFrames ? Math.min(1, holdCount / maxFrames) : 0;
+    const totalProgress = Math.round(((completed + holdProgress) / faceActionSteps.length) * 100);
+    const progressBar = document.getElementById('camera-action-progress-bar');
+    if (progressBar) progressBar.style.width = `${totalProgress}%`;
     if (step) {
         updateCameraActionGuide(
             `${faceActionCapture.currentIndex + 1}/${faceActionSteps.length}`,
@@ -2412,7 +2882,6 @@ function updateActionPrompt(text = null, holdCount = 0, maxFrames = 6) {
 function updateActionMetrics(action) {
     setText('action-yaw', action ? action.yaw.toFixed(2) : '-');
     setText('action-pitch', action ? action.pitch.toFixed(2) : '-');
-    setText('action-mouth', action ? action.mouthOpen.toFixed(2) : '-');
     setText('action-blink', action ? action.eyeOpen.toFixed(2) : '-');
 }
 
@@ -2435,7 +2904,12 @@ function updateCameraActionGuide(stepText, title, detail, state = '') {
     if (guide) {
         guide.classList.toggle('is-capturing', state === 'capturing');
         guide.classList.toggle('is-done', state === 'done');
+        guide.dataset.action = faceActionSteps[faceActionCapture.currentIndex]?.id || '';
     }
+    const startButton = document.getElementById('camera-guide-start');
+    const skipButton = document.getElementById('camera-guide-skip');
+    if (startButton) startButton.textContent = faceActionCapture.active ? '重新采集' : (state === 'done' ? '再采一次' : '开始采集');
+    if (skipButton) skipButton.disabled = !faceActionCapture.active;
 }
 
 function toggleMediapipeMesh(button) {
@@ -2446,12 +2920,37 @@ function toggleMediapipeGlasses(button) {
     setCameraGlassesVisible(!cameraGlassesEnabled);
 }
 
+function toggleBeautyMode(button) {
+    beautyModeEnabled = !beautyModeEnabled;
+    localStorage.setItem('zz_glasses_beauty', String(beautyModeEnabled));
+    button.classList.toggle('active', beautyModeEnabled);
+    applyBeautyMode();
+    showToast(beautyModeEnabled ? '美颜已开启' : '美颜已关闭');
+}
+
+function applyBeautyMode() {
+    const videos = document.querySelectorAll('#mediapipe-video, #camera-feed');
+    videos.forEach(video => {
+        if (beautyModeEnabled) {
+            video.style.filter = 'brightness(1.08) contrast(0.96) saturate(1.12) blur(0.2px)';
+        } else {
+            video.style.filter = '';
+        }
+    });
+}
+
 async function toggleCameraFacing(button) {
     await switchMediapipeCamera();
 }
 
 function setMediapipeGlasses(style) {
     const frame = getFrameCatalog().find(item => item.id === style) || getSelectedFrame();
+    if (frame && !getFrameTryOnSource(frame)) {
+        showToast(frame.tryOnUnavailableReason || '这款暂时没有合格的正面试戴图');
+        const select = document.getElementById('mediapipe-glasses-style');
+        if (select) select.value = getSelectedFrame()?.id || '';
+        return;
+    }
     if (frame) {
         selectedFrameId = frame.id;
         cameraGlassesStyle = getCameraGlassesPayload(frame);
@@ -2469,9 +2968,33 @@ function setMediapipeGlasses(style) {
         refreshCameraGlassesPayload();
     }
     updateSelectedFrameUI();
+    refreshSelectedFrameFitAssessment();
     drawFaceOverlay();
     renderFrame3DPreview(frame);
     saveGlassesHomeState();
+}
+
+function refreshSelectedFrameFitAssessment() {
+    if (!latestAnalysis || !globalThis.ZZCameraQuality?.calculateFitAssessment) return;
+    const frame = getSelectedFrame();
+    if (!frame) return;
+    const assessment = globalThis.ZZCameraQuality.calculateFitAssessment({
+        pd: latestAnalysis.pd,
+        lensWidth: frame.lensWidth || latestAnalysis.recommendedLensWidth,
+        bridgeWidth: frame.bridgeSize || frame.bridgeWidth || latestAnalysis.recommendedBridgeWidth,
+        bridgeTarget: latestAnalysis.recommendedBridgeWidth,
+        measurementConfidence: latestAnalysis.measurementScaleConfidence,
+        calibrated: latestAnalysis.measurementScaleSource === 'pd'
+    });
+    Object.assign(latestAnalysis, {
+        fitScore: assessment.score,
+        fitScoreLabel: assessment.label,
+        riskLevel: assessment.riskLevel,
+        decentration: assessment.decentration,
+        decentrationLabel: assessment.label
+    });
+    setText('fit-score', `${assessment.score}/100 · ${assessment.label}`);
+    renderAnalysisReport(latestAnalysis);
 }
 
 function refreshCameraGlassesPayload() {
@@ -2506,7 +3029,7 @@ function updatePreviewGlassesControl(type, value) {
 }
 
 function resetPreviewGlassesControls() {
-    previewGlassesScale = 1;
+    previewGlassesScale = 0.9;
     previewGlassesOffsetX = 0;
     previewGlassesOffsetY = 0;
     previewGlassesRotation = 0;
@@ -2579,7 +3102,7 @@ function estimateIdealGlassesScale(frame, analysis = {}) {
         physicalScale = physicalScale * (0.78 + sizeFitFactor * 0.22);
     }
 
-    return clampFloat(physicalScale, 0.5, 1.9);
+    return clampFloat(physicalScale * 0.9, 0.45, 1.75);
 }
 
 function getFrameTotalWidth(frame, analysis = {}) {
@@ -2834,11 +3357,25 @@ function getCurrentTryOnAdjustment() {
 function buildClientTryOnAdjustment(metrics = getTryOnCorrectionMetrics(), frame = getSelectedFrame(), analysis = latestAnalysis || buildAnalysis({})) {
     const base = getCurrentTryOnAdjustment();
     const idealScale = frame ? estimateIdealGlassesScale(frame, analysis) : base.scale;
+    const eyeAngle = Number(metrics.eyeAngle || 0);
+    const pd = clampNumber(Number(analysis.pd || 63), 50, 75);
+    const pdRatio = Number(metrics.pdRatio || pd / 200);
+    const frameTotal = getFrameTotalWidth(frame, analysis);
+
+    // 根据瞳距比例和镜框总宽，微调水平居中
+    const expectedPdRatio = pd / 200; // 归一化估算
+    const centerDriftX = pdRatio ? (pdRatio - expectedPdRatio) * 160 : 0;
+
+    // 根据脸长/脸宽比例，微调垂直位置（让镜框落在鼻梁中段）
+    const faceHeight = Number(analysis.faceHeight || 185);
+    const faceWidth = Number(analysis.faceWidth || 140);
+    const verticalDriftY = faceHeight && faceWidth ? ((faceHeight / faceWidth) - 1.32) * 22 : 0;
+
     return {
         scale: idealScale,
-        offsetX: base.offsetX,
-        offsetY: base.offsetY,
-        rotation: Math.abs(Number(metrics.eyeAngle || 0)) > 8 ? base.rotation * 0.45 : base.rotation * 0.25
+        offsetX: base.offsetX + clampNumber(centerDriftX, -28, 28),
+        offsetY: base.offsetY + clampNumber(verticalDriftY, -22, 22),
+        rotation: Math.abs(eyeAngle) > 8 ? eyeAngle * 0.35 : eyeAngle * 0.18
     };
 }
 
@@ -3012,7 +3549,9 @@ function drawModelPreview(analysis = latestAnalysis) {
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
 
-    if (analysis?.meshPoints?.length) {
+    // 试戴预览默认「只要镜」：不画人脸网格/关键点/占位椭圆框。
+    // 需要调试网格时才把 previewShowMesh 置为 true。
+    if (previewShowMesh && analysis?.meshPoints?.length) {
         drawDetectedFaceMesh(ctx, width, height, analysis.meshPoints, t);
     }
 
@@ -3022,7 +3561,7 @@ function drawModelPreview(analysis = latestAnalysis) {
 
     const headW = 150 + (faceWidth - 140) * 0.7;
     const headH = 220 + (faceHeight - 185) * 0.55;
-    if (!analysis?.meshPoints?.length) {
+    if (previewShowMesh && !analysis?.meshPoints?.length) {
         ctx.strokeStyle = 'rgba(15, 118, 110, 0.28)';
         ctx.lineWidth = 1.2;
         for (let i = -3; i <= 3; i++) {
@@ -3037,44 +3576,52 @@ function drawModelPreview(analysis = latestAnalysis) {
         }
     }
 
-    ctx.strokeStyle = '#0f766e';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, headW / 2, headH / 2, 0, 0, Math.PI * 2);
-    ctx.stroke();
+    if (previewShowMesh) {
+        ctx.strokeStyle = '#0f766e';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, headW / 2, headH / 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+    }
 
     const eyeGap = pd * 1.45;
     const lensW = recommendedWidth * 0.43;
     const lensH = lensW * 0.58;
     const frameImage = selectedFrameImage?.complete ? selectedFrameImage : null;
+    // 统一垂直基准：真镜框与兜底镜框都以 lensTop 为上沿，切换款式时不再跳位。
+    const lensTop = -46;
     if (frameImage) {
         const frameW = Math.min(headW * 1.08, recommendedWidth * 1.72);
         const frameH = frameW * 0.38;
-        ctx.drawImage(frameImage, -frameW / 2, -46, frameW, frameH);
+        drawTryOnFrameImage(ctx, frameImage, -frameW / 2, lensTop, frameW, frameH);
     } else {
         ctx.strokeStyle = '#10202a';
         ctx.lineWidth = 6;
         ctx.beginPath();
-        ctx.roundRect(-eyeGap / 2 - lensW / 2, -24, lensW, lensH, 18);
-        ctx.roundRect(eyeGap / 2 - lensW / 2, -24, lensW, lensH, 18);
-        ctx.moveTo(-eyeGap / 2 + lensW / 2, -4);
-        ctx.lineTo(eyeGap / 2 - lensW / 2, -4);
+        ctx.roundRect(-eyeGap / 2 - lensW / 2, lensTop, lensW, lensH, 18);
+        ctx.roundRect(eyeGap / 2 - lensW / 2, lensTop, lensW, lensH, 18);
+        ctx.moveTo(-eyeGap / 2 + lensW / 2, lensTop + lensH - 20);
+        ctx.lineTo(eyeGap / 2 - lensW / 2, lensTop + lensH - 20);
         ctx.stroke();
     }
 
-    ctx.strokeStyle = '#e66f51';
-    ctx.lineWidth = 3;
-    ctx.setLineDash([8, 8]);
-    ctx.beginPath();
-    ctx.moveTo(-recommendedWidth * 0.8, -80);
-    ctx.lineTo(recommendedWidth * 0.8, -80);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    if (previewShowMesh) {
+        ctx.strokeStyle = '#e66f51';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([8, 8]);
+        ctx.beginPath();
+        ctx.moveTo(-recommendedWidth * 0.8, -80);
+        ctx.lineTo(recommendedWidth * 0.8, -80);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
 
-    ctx.fillStyle = '#10202a';
-    ctx.font = '700 18px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(`镜圈 ${analysis?.recommendedLensWidth || 51} mm`, 0, -96);
+    if (previewShowMesh) {
+        ctx.fillStyle = '#10202a';
+        ctx.font = '700 18px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`镜圈 ${analysis?.recommendedLensWidth || 51} mm`, 0, -96);
+    }
     ctx.restore();
 
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
@@ -3179,17 +3726,17 @@ function renderRecommendations(recs = currentRecommendations) {
             ${pageItems.map((r, i) => `
                 <div class="rec-card ${r.id === selected.id ? 'selected' : ''}" data-frame-id="${escapeHtml(r.id || getFrameImage(i).id)}">
                     <button class="rec-image" type="button" onclick="openFrameImageViewer(${jsArg(r.id || getFrameImage(i).id)})" aria-label="查看${escapeHtml(r.name)}全图">
-                        <img src="${escapeHtml(toAbsoluteAssetUrl(r.image || getFrameImage(i).src))}" alt="${escapeHtml(r.imageAlt || r.name)}" loading="lazy" decoding="async" onerror="handleFrameImageError(this)">
+                        ${renderFrameThumbImg(r, i)}
                     </button>
                     <div class="rec-title-row">
                         <h4>${escapeHtml(r.name)}</h4>
                         ${r.score ? `<span>${r.score} 分</span>` : ''}
                     </div>
-                    <p class="rec-merchant">${escapeHtml(r.merchantName || 'CHATGPT')} · ${escapeHtml(r.type || '镜框')} ${r.price ? `· ¥${escapeHtml(r.price)}` : ''}</p>
+                    <p class="rec-merchant">${escapeHtml(r.merchantName || 'Kimi 精选')} · ${escapeHtml(r.type || '镜框')} ${r.price ? `· ¥${escapeHtml(r.price)}` : ''}</p>
                     ${r.specs ? `<p class="rec-specs">${escapeHtml(r.specs)}</p>` : ''}
                     <p class="rec-reason">${escapeHtml(r.reason)}</p>
                     <div class="rec-actions">
-                        <button class="btn btn-secondary" onclick="selectFrameForTryOn(${jsArg(r.id || getFrameImage(i).id)})">试戴这副</button>
+                        <button class="btn btn-secondary" onclick="selectFrameForTryOn(${jsArg(r.id || getFrameImage(i).id)})" ${getFrameTryOnSource(r) ? '' : 'disabled'}>${getFrameTryOnSource(r) ? '试戴这副' : '试戴图处理中'}</button>
                         <button class="btn btn-secondary" onclick="openFrameImageViewer(${jsArg(r.id || getFrameImage(i).id)})">看全图</button>
                         <button class="btn btn-primary" onclick="addFrameToWishlist(${jsArg(r.id || getFrameImage(i).id)})">加入心愿单</button>
                     </div>
@@ -3205,11 +3752,19 @@ function renderTryOnStrip() {
     if (!strip) return;
 
     const selected = ensureSelectedFrame();
-    const frames = getFrameCatalog();
+    const frames = getFrameCatalog().filter(frame => getFrameTryOnSource(frame));
     if (!frames.length || !selected) {
         strip.innerHTML = '<p class="text-dim">暂无可试戴镜框。</p>';
         return;
     }
+    const sourceCounts = frames.reduce((counts, frame) => {
+        const source = frame.merchantName || '镜框商家';
+        counts.set(source, (counts.get(source) || 0) + 1);
+        return counts;
+    }, new Map());
+    const sourceSummary = Array.from(sourceCounts.entries())
+        .map(([name, count]) => `${name} ${count} 款`)
+        .join(' · ');
 
     strip.innerHTML = `
         <div class="tryon-strip-head">
@@ -3217,7 +3772,7 @@ function renderTryOnStrip() {
                 <span>当前试戴</span>
                 <strong>${escapeHtml(selected.name)}</strong>
             </div>
-            <small>${frames.length} 款，左右滑动选择</small>
+            <small>${escapeHtml(sourceSummary)} · 左右滑动选择</small>
         </div>
         <div class="tryon-strip-track">
             ${frames.map(frame => {
@@ -3226,9 +3781,10 @@ function renderTryOnStrip() {
                     <div class="tryon-pill ${frame.id === selected.id ? 'selected' : ''}" data-frame-id="${escapeHtml(frame.id)}">
                         <button class="tryon-pill-main" type="button" onclick="selectFrameForTryOn(${jsArg(frame.id)})" aria-label="试戴${escapeHtml(frame.name)}">
                             <span class="tryon-pill-image">
-                                <img src="${escapeHtml(toAbsoluteAssetUrl(frame.image))}" alt="${escapeHtml(frame.imageAlt || frame.name)}" loading="lazy" decoding="async" onerror="handleFrameImageError(this)">
+                                ${renderFrameThumbImg(frame, 0)}
                             </span>
                             <span>${escapeHtml(frame.name)}</span>
+                            <em>${escapeHtml(frame.merchantName || '镜框商家')}</em>
                         </button>
                         <button class="tryon-pill-wish" type="button" onclick="${wished ? `removeSelectedFrameFromWishlist(${jsArg(frame.id)})` : `addSelectedFrameToWishlist(${jsArg(frame.id)})`}">${wished ? '移出心愿单' : '加入心愿单'}</button>
                         <button class="tryon-pill-view" type="button" onclick="openFrameImageViewer(${jsArg(frame.id)})">看全图</button>
@@ -3256,6 +3812,15 @@ function updateSelectedFrameUI() {
 
 function handleFrameImageError(img) {
     if (!img || img.dataset.fallbackTried === 'blank') return;
+
+    // thumb 加载失败 -> 退回原图，保证任何情况下都有图可看
+    const full = img.dataset.full;
+    if (full && img.dataset.fallbackTried !== 'full') {
+        img.dataset.fallbackTried = 'full';
+        img.srcset = '';
+        img.src = full;
+        return;
+    }
 
     const fallback = withoutVersion(img.currentSrc || img.src || img.getAttribute('src'));
     if (img.dataset.fallbackTried !== 'noquery' && fallback && fallback !== img.src) {
@@ -3319,11 +3884,19 @@ function openFrameImageViewer(frameId = selectedFrameId) {
         image.alt = frame.imageAlt || frame.name || '镜框全图';
     }
     if (title) title.textContent = frame.name || '未命名镜框';
-    if (meta) meta.textContent = `${frame.merchantName || 'CHATGPT'} · 镜圈 ${frame.lensWidth || '-'} mm / 鼻梁 ${frame.bridgeSize || '-'} mm / 镜腿 ${frame.templeLength || '-'} mm`;
+    if (meta) meta.textContent = `${frame.merchantName || 'Kimi 精选'} · 镜圈 ${frame.lensWidth || '-'} mm / 鼻梁 ${frame.bridgeSize || '-'} mm / 镜腿 ${frame.templeLength || '-'} mm`;
     if (tryOn) tryOn.onclick = () => {
+        if (!getFrameTryOnSource(frame)) {
+            showToast(frame.tryOnUnavailableReason || '这款暂时没有合格的正面试戴图');
+            return;
+        }
         selectFrameForTryOn(frame.id);
         closeFrameImageViewer();
     };
+    if (tryOn) {
+        tryOn.disabled = !getFrameTryOnSource(frame);
+        tryOn.textContent = getFrameTryOnSource(frame) ? '试戴这副' : '试戴图处理中';
+    }
     if (wish) {
         const wished = isFrameInWishlist(frame.id);
         wish.textContent = wished ? '已在心愿单' : '加入心愿单';
@@ -3358,7 +3931,7 @@ function renderDefaultRecommendations() {
         ...frame,
         score: index < 4 ? 88 - index : 82 - (index - 4),
         specs: `镜圈 ${frame.lensWidth} mm / 鼻梁 ${frame.bridgeSize} mm / 镜腿 ${frame.templeLength} mm`,
-        reason: frame.description || `${frame.merchantName || 'CHATGPT'} 镜框库款式。先看镜圈宽度和鼻梁宽，识别后再计算移心量。`
+        reason: frame.description || `${frame.merchantName || 'Kimi 精选'} 镜框库款式。先看镜圈宽度和鼻梁宽，识别后再计算移心量。`
     })));
 }
 
@@ -3371,6 +3944,10 @@ function selectFrameForTryOn(frameId) {
     const frame = getFrameCatalog().find(item => item.id === frameId);
     if (!frame) {
         showToast('没有找到这款镜框');
+        return;
+    }
+    if (!getFrameTryOnSource(frame)) {
+        showToast(frame.tryOnUnavailableReason || '这款暂时没有合格的正面试戴图，请先看完整原图');
         return;
     }
 
@@ -3416,7 +3993,7 @@ function saveGlassesHomeState() {
                 bridgeSize: frame.bridgeSize,
                 templeLength: frame.templeLength
             } : null,
-            tryOnImage: latestTryOnSnapshotDataUrl || readStoredTryOnSnapshot(),
+            hasTryOnImage: Boolean(latestTryOnSnapshotDataUrl || readStoredTryOnSnapshot()),
             customization: readSavedCustomizationData(),
             prescription: getSavedPrescriptionData()
         };
@@ -3437,7 +4014,7 @@ function saveOnboardStepProgress(showMessage = true) {
         step: onboardStepIndex,
         completedSteps: Array.from({ length: Math.max(0, onboardStepIndex - 1) }, (_, index) => index + 1),
         actionSamples: latestCameraSamples.slice(-CAMERA_SAMPLE_LIMIT),
-        lastCameraImage: latestCameraFrameDataUrl || latestTryOnSnapshotDataUrl || '',
+        hasCameraImage: Boolean(latestCameraFrameDataUrl || latestTryOnSnapshotDataUrl),
         updatedAt: new Date().toISOString()
     };
     try {
@@ -3480,9 +4057,15 @@ function storeTryOnSnapshot(dataUrl) {
     }
     try {
         localStorage.setItem(getTryOnSnapshotKey(), dataUrl);
-        localStorage.setItem('zz_glasses_tryon_snapshot_last', dataUrl);
+        localStorage.removeItem('zz_glasses_tryon_snapshot_last');
     } catch (error) {
-        console.warn('Store try-on snapshot failed:', error);
+        localStorage.removeItem('zz_glasses_tryon_snapshot_last');
+        localStorage.removeItem(SERVER_SYNC_QUEUE_KEY);
+        try {
+            localStorage.setItem(getTryOnSnapshotKey(), dataUrl);
+        } catch (retryError) {
+            console.warn('Store try-on snapshot failed:', retryError);
+        }
     }
 }
 
@@ -3612,7 +4195,7 @@ ${[
 ].map(([label, value]) => `<div class="item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || '-')}</strong></div>`).join('')}
 </section>
 <h2>当前镜框</h2>
-<p>${frame ? `${escapeHtml(frame.name)} / ${escapeHtml(frame.merchantName || 'CHATGPT')} / 镜圈 ${escapeHtml(frame.lensWidth || '-')} mm / 鼻梁 ${escapeHtml(frame.bridgeSize || '-')} mm` : '未选择镜框'}</p>
+<p>${frame ? `${escapeHtml(frame.name)} / ${escapeHtml(frame.merchantName || 'Kimi 精选')} / 镜圈 ${escapeHtml(frame.lensWidth || '-')} mm / 鼻梁 ${escapeHtml(frame.bridgeSize || '-')} mm` : '未选择镜框'}</p>
 <h2>验光单</h2>
 <p>${escapeHtml(hasPrescriptionData(payload.prescription || {}) ? prescriptionText : '未填写。正式下单前需补充医院或门店验光数据。')}</p>
 <h2>流程记录</h2>
@@ -3922,11 +4505,11 @@ function renderWishlistPanel() {
                 return `
                     <article class="wishlist-item">
                         <button class="wishlist-frame-image" type="button" onclick="openFrameImageViewer(${jsArg(frame.id || '')})" aria-label="查看${escapeHtml(frame.name || '镜框')}全图">
-                            <img src="${escapeHtml(toAbsoluteAssetUrl(frame.image || ''))}" alt="${escapeHtml(frame.imageAlt || frame.name || '镜框')}" onerror="handleFrameImageError(this)">
+                            ${renderFrameThumbImg(frame, 0)}
                         </button>
                         <div>
                             <strong>${escapeHtml(frame.name || '未命名镜框')}</strong>
-                            <span>${escapeHtml(frame.merchantName || 'CHATGPT')} · 镜圈 ${escapeHtml(frame.lensWidth || '-')} mm / 鼻梁 ${escapeHtml(frame.bridgeSize || '-')} mm</span>
+                            <span>${escapeHtml(frame.merchantName || 'Kimi 精选')} · 镜圈 ${escapeHtml(frame.lensWidth || '-')} mm / 鼻梁 ${escapeHtml(frame.bridgeSize || '-')} mm</span>
                         </div>
                         <div class="wishlist-actions">
                             <button class="icon-toggle" type="button" onclick="openFrameImageViewer(${jsArg(frame.id || '')})">全图</button>
@@ -4435,7 +5018,7 @@ async function createGlassesOrder(frameId) {
     ].join(' / ');
 
     try {
-        const response = await fetch(`${API_BASE}/api/shop/glasses/orders`, {
+        const response = await fetch(`${API_BASE}/api/glasses/order/create-shop`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -4516,11 +5099,13 @@ function readLocalArray(key) {
 
 function writeLocalArray(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
-    queueServerSync(key, value);
+    if (key.startsWith('zz_glasses_wishlist_')) queueServerSync('wishlist', value);
 }
 
 function queueServerSync(type, payload) {
     const uid = getCurrentUserId();
+    const token = currentUser?.authToken || localStorage.getItem(PASSPORT_TOKEN_KEY) || '';
+    if (!uid || isTemporaryUser || !SYNCABLE_SESSION_TYPES.has(type)) return;
     const record = {
         id: `sync_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         type,
@@ -4534,14 +5119,21 @@ function queueServerSync(type, payload) {
     } catch (error) {
         console.warn('Queue server sync failed:', error);
     }
-    if (!uid || !navigator.onLine) return;
+    if (!navigator.onLine || !token) return;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 7000);
     fetch(`${API_BASE}/api/glasses/session/save`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(record),
         signal: controller.signal
+    }).then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const queue = readLocalArray(SERVER_SYNC_QUEUE_KEY).filter(item => item.id !== record.id);
+        localStorage.setItem(SERVER_SYNC_QUEUE_KEY, JSON.stringify(queue));
     }).catch(error => console.warn('Remote session sync unavailable:', error.message))
         .finally(() => clearTimeout(timer));
 }
@@ -4755,7 +5347,8 @@ function drawFaceOverlay() {
     const imageRect = getObjectContainRect(canvas, image);
     const mirrored = image.dataset.mirrored === '1';
     const points = latestPreviewMeshPoints?.length ? latestPreviewMeshPoints : (latestAnalysis?.previewMeshPoints?.length ? latestAnalysis.previewMeshPoints : latestAnalysis?.meshPoints || []);
-    if (previewKeypointsEnabled && points.length) {
+    // 默认「只要镜」：网格/关键点需 previewShowMesh 打开
+    if (previewKeypointsEnabled && previewShowMesh && points.length) {
         drawPreviewKeypoints(ctx, imageRect, points, mirrored);
     }
 
@@ -4800,6 +5393,10 @@ function captureLatestCameraSnapshot() {
 }
 
 function captureCameraFrameDataUrl(video) {
+    return captureCameraFrameSnapshot(video)?.dataUrl || null;
+}
+
+function captureCameraFrameSnapshot(video) {
     if (!video?.videoWidth || !video?.videoHeight) return null;
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
@@ -4810,7 +5407,32 @@ function captureCameraFrameDataUrl(video) {
         ctx.scale(-1, 1);
     }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', 0.9);
+    const sampleWidth = Math.min(160, canvas.width);
+    const sampleHeight = Math.max(1, Math.round(canvas.height * sampleWidth / canvas.width));
+    const sampleCanvas = document.createElement('canvas');
+    sampleCanvas.width = sampleWidth;
+    sampleCanvas.height = sampleHeight;
+    const sampleContext = sampleCanvas.getContext('2d', { willReadFrequently: true });
+    sampleContext.drawImage(canvas, 0, 0, sampleWidth, sampleHeight);
+    const pixels = sampleContext.getImageData(0, 0, sampleWidth, sampleHeight).data;
+    let brightnessTotal = 0;
+    let edgeTotal = 0;
+    let edgeCount = 0;
+    let previous = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+        const gray = (pixels[index] * 0.299 + pixels[index + 1] * 0.587 + pixels[index + 2] * 0.114) / 255;
+        brightnessTotal += gray;
+        if (index > 0 && index % (sampleWidth * 4) !== 0) {
+            edgeTotal += Math.abs(gray - previous);
+            edgeCount += 1;
+        }
+        previous = gray;
+    }
+    return {
+        dataUrl: canvas.toDataURL('image/jpeg', 0.9),
+        brightness: brightnessTotal / Math.max(1, pixels.length / 4),
+        sharpness: Math.min(1, edgeTotal / Math.max(1, edgeCount) * 8)
+    };
 }
 
 function getObjectContainRect(canvas, image) {
@@ -4886,8 +5508,9 @@ function drawPreviewGlasses(ctx, rect, points, mirrored = false) {
             ctx.save();
             ctx.translate(centerX, centerY);
             ctx.rotate(angle + previewGlassesRotation * Math.PI / 180);
+            if (mirrored) ctx.scale(-1, 1); // 贴合镜像预览：坐标已镜像，镜框图需水平翻一次（否则非对称镜框左右反）
             ctx.globalAlpha = 0.96;
-            ctx.drawImage(frameImage, -frameW / 2, -frameH / 2, frameW, frameH);
+            drawTryOnFrameImage(ctx, frameImage, -frameW / 2, -frameH / 2, frameW, frameH);
             ctx.restore();
             return;
         }
@@ -4896,9 +5519,10 @@ function drawPreviewGlasses(ctx, rect, points, mirrored = false) {
     const frameW = rect.width * 0.42 * overlayScale;
     const frameH = frameW * (frameImage.naturalHeight / frameImage.naturalWidth);
     ctx.save();
-    ctx.translate(rect.x + rect.width / 2 + previewGlassesOffsetX, rect.y + rect.height * 0.38 + previewGlassesOffsetY);
-    ctx.rotate(previewGlassesRotation * Math.PI / 180);
-    ctx.drawImage(frameImage, -frameW / 2, -frameH / 2, frameW, frameH);
+            ctx.translate(rect.x + rect.width / 2 + previewGlassesOffsetX, rect.y + rect.height * 0.38 + previewGlassesOffsetY);
+            ctx.rotate(previewGlassesRotation * Math.PI / 180);
+            if (mirrored) ctx.scale(-1, 1); // 贴合镜像预览
+            drawTryOnFrameImage(ctx, frameImage, -frameW / 2, -frameH / 2, frameW, frameH);
     ctx.restore();
 }
 
@@ -4962,9 +5586,11 @@ Object.assign(window, {
     captureMediapipeModel,
     startActionCapture,
     resetActionCapture,
+    clearActionCaptureResult,
     skipCurrentActionCaptureStep,
     toggleMediapipeMesh,
     toggleMediapipeGlasses,
+    toggleBeautyMode,
     toggleCameraFacing,
     setMediapipeGlasses,
     updatePreviewGlassesControl,
